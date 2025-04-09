@@ -202,6 +202,7 @@ Avant de commencer, assurez-vous d'avoir les éléments suivants :
 - L'outil en ligne de commande `kubectl` configuré.
 - L'outil `aws-cli` configuré pour votre compte AWS.
 - Un utilisateur ou rôle AWS avec accès au bucket S3.
+- Creation d'un bucket s3 pour le state
 
 
 
@@ -227,7 +228,7 @@ Avant de commencer, assurez-vous d'avoir les éléments suivants :
    # Créez un bucket S3
    resource "aws_s3_bucket" "example_bucket" {
      bucket        = "example-terraform-bucket-123456" # Remplacez par un nom unique
-     acl           = "private"
+     #acl           = "private"
    
      tags = {
        Name        = "example-s3-bucket"
