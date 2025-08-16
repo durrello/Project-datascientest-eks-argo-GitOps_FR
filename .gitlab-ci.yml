@@ -1,215 +1,66 @@
-# .gitlab-ci.yml - Fixed version.
+# .gitlab-ci.yml
 stages:
+  - validate
   - plan
-  - apply
+  - deploy
 
 variables:
-  TF_CLOUD_ORGANIZATION: "durrell"
-  TF_WORKSPACE: $TF_WORKSPACE               # Set in GitLab CI/CD variables
-  TF_TOKEN_app_terraform_io: $TF_API_TOKEN  # Set in GitLab CI/CD variables
-  AWS_REGION: $AWS_REGION                   # Set in GitLab CI/CD variables
-  IAM_ROLE: $IAM_ROLE                       # Set in GitLab CI/CD variables
+  TERRAFORM_VERSION: "1.5.7"
+  TF_ROOT: "Livrables/EKS-TF"  # Change this to your terraform directory
+  TF_STATE_NAME: "default"
+  AWS_DEFAULT_REGION: "us-east-1"      # Change to your preferred region
 
-default:
-  # Use Alpine Linux with curl and jq pre-installed instead of terraform image
-  image: alpine:latest
+# Use official terraform image
+image:
+  name: hashicorp/terraform:$TERRAFORM_VERSION
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 before_script:
-  # Install required packages
-  - apk add --no-cache python3 py3-pip jq bash curl terraform aws-cli
-  # Authenticate to AWS using OIDC
-  - |
-    aws sts assume-role-with-web-identity \
-      --role-arn "$IAM_ROLE" \
-      --role-session-name "GitLab_to_AWS_via_FederatedOIDC" \
-      --web-identity-token $CI_JOB_JWT_V2 \
-      --duration-seconds 3600 > /tmp/creds.json
-  - export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' /tmp/creds.json)
-  - export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' /tmp/creds.json)
-  - export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' /tmp/creds.json)
-  - echo "AWS credentials configured successfully"
+  - cd $TF_ROOT
+  - terraform --version
+  - terraform init
 
-plan:
-  stage: plan
-  script:
-    - echo "Starting Terraform Cloud plan process..."
-    
-    # Create Terraform Cloud configuration version
-    - |
-      echo "Creating configuration version..."
-      RESPONSE=$(curl -s -X POST \
-        -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-        -H "Content-Type: application/vnd.api+json" \
-        -d '{"data":{"type":"configuration-versions"}}' \
-        https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/$TF_WORKSPACE/configuration-versions)
-      
-      CONFIG_VERSION_ID=$(echo $RESPONSE | jq -r '.data.id')
-      UPLOAD_URL=$(echo $RESPONSE | jq -r '.data.attributes."upload-url"')
-      
-      if [ "$CONFIG_VERSION_ID" = "null" ]; then
-        echo "Failed to create configuration version"
-        echo "Response: $RESPONSE"
-        exit 1
-      fi
-      
-      echo "Configuration version created: $CONFIG_VERSION_ID"
-      echo "CONFIG_VERSION_ID=$CONFIG_VERSION_ID" > plan.env
-      echo "UPLOAD_URL=$UPLOAD_URL" >> plan.env
-
-    # Upload configuration files to Terraform Cloud
-    - |
-      echo "Uploading configuration files..."
-      # Create a tar.gz of the terraform directory
-      tar -czf config.tar.gz -C terraform .
-      
-      # Upload the configuration
-      curl -X PUT \
-        -H "Content-Type: application/octet-stream" \
-        --data-binary @config.tar.gz \
-        "$UPLOAD_URL"
-      
-      echo "Configuration uploaded successfully"
-
-    # Create a plan run
-    - |
-      echo "Creating plan run..."
-      PLAN_RESPONSE=$(curl -s -X POST \
-        -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-        -H "Content-Type: application/vnd.api+json" \
-        -d "{\"data\":{\"attributes\":{\"is-destroy\":false,\"message\":\"Plan triggered from GitLab CI - Commit: $CI_COMMIT_SHA\"},\"type\":\"runs\",\"relationships\":{\"workspace\":{\"data\":{\"type\":\"workspaces\",\"id\":\"$TF_WORKSPACE\"}},\"configuration-version\":{\"data\":{\"type\":\"configuration-versions\",\"id\":\"$CONFIG_VERSION_ID\"}}}}}" \
-        https://app.terraform.io/api/v2/runs)
-      
-      PLAN_RUN_ID=$(echo $PLAN_RESPONSE | jq -r '.data.id')
-      
-      if [ "$PLAN_RUN_ID" = "null" ]; then
-        echo "Failed to create plan run"
-        echo "Response: $PLAN_RESPONSE"
-        exit 1
-      fi
-      
-      echo "PLAN_RUN_ID=$PLAN_RUN_ID" >> plan.env
-      echo "Terraform plan run created: $PLAN_RUN_ID"
-
-    # Wait for plan to complete
-    - |
-      echo "Waiting for plan to complete..."
-      STATUS=""
-      COUNTER=0
-      MAX_ATTEMPTS=60  # 10 minutes max
-      
-      while [[ "$STATUS" != "planned" && "$STATUS" != "errored" && "$STATUS" != "canceled" ]]; do
-        if [ $COUNTER -gt $MAX_ATTEMPTS ]; then
-          echo "Plan timed out after $MAX_ATTEMPTS attempts"
-          exit 1
-        fi
-        
-        sleep 10
-        STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID)
-        STATUS=$(echo $STATUS_RESPONSE | jq -r '.data.attributes.status')
-        
-        echo "Plan status: $STATUS"
-        COUNTER=$((COUNTER + 1))
-      done
-      
-      if [[ "$STATUS" == "errored" || "$STATUS" == "canceled" ]]; then
-        echo "Plan failed with status: $STATUS"
-        exit 1
-      fi
-      
-      echo "Plan completed successfully with status: $STATUS"
-
-  artifacts:
-    reports:
-      dotenv: plan.env
-    expire_in: 1 hour
-  only:
-    - main
-    - merge_requests
-
-apply:
-  stage: apply
-  when: manual
-  dependencies:
-    - plan
-  script:
-    - echo "Starting Terraform Cloud apply process..."
-    - source plan.env
-    
-    # Confirm and apply the run
-    - |
-      echo "Confirming and applying run: $PLAN_RUN_ID"
-      APPLY_RESPONSE=$(curl -s -X POST \
-        -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-        -H "Content-Type: application/vnd.api+json" \
-        https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID/actions/confirm)
-      
-      echo "Apply run confirmed"
-      echo "Response: $APPLY_RESPONSE"
-
-    # Poll run status until finished
-    - |
-      echo "Polling Terraform Cloud run status..."
-      STATUS=""
-      COUNTER=0
-      MAX_ATTEMPTS=120  # 20 minutes max for apply
-      
-      while [[ "$STATUS" != "applied" && "$STATUS" != "errored" && "$STATUS" != "canceled" ]]; do
-        if [ $COUNTER -gt $MAX_ATTEMPTS ]; then
-          echo "Apply timed out after $MAX_ATTEMPTS attempts"
-          exit 1
-        fi
-        
-        sleep 10
-        STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID)
-        STATUS=$(echo $STATUS_RESPONSE | jq -r '.data.attributes.status')
-        
-        echo "Apply status: $STATUS (attempt $COUNTER/$MAX_ATTEMPTS)"
-        COUNTER=$((COUNTER + 1))
-      done
-      
-      if [[ "$STATUS" == "errored" || "$STATUS" == "canceled" ]]; then
-        echo "Apply failed with status: $STATUS"
-        
-        # Get error details
-        ERROR_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID)
-        echo "Error details: $ERROR_RESPONSE"
-        exit 1
-      fi
-      
-      echo "Terraform apply completed successfully with status: $STATUS"
-      
-    # Get apply outputs
-    - |
-      echo "Retrieving Terraform outputs..."
-      OUTPUTS_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-        https://app.terraform.io/api/v2/workspaces/$TF_WORKSPACE/current-state-version)
-      echo "Outputs available in Terraform Cloud workspace"
-
-  environment:
-    name: production
-  only:
-    - main
-
-# Alternative job for local Terraform execution (if needed)
-terraform-local:
-  stage: plan
-  image: hashicorp/terraform:1.9.5
-  variables:
-    TF_IN_AUTOMATION: "true"
-  before_script:
-    - cd terraform
-    - terraform --version
-    - terraform init
+# Validate terraform configuration
+terraform:validate:
+  stage: validate
   script:
     - terraform validate
-    - terraform plan -out=tfplan
+  only:
+    - branches
+
+# Plan terraform changes
+terraform:plan:
+  stage: plan
+  script:
+    - terraform plan -out="planfile"
   artifacts:
     paths:
-      - terraform/tfplan
+      - $TF_ROOT/planfile
     expire_in: 1 week
-  when: manual
+  only:
+    - branches
+
+# Apply terraform changes (only on main/master branch)
+terraform:apply:
+  stage: deploy
+  script:
+    - terraform apply -input=false "planfile"
+  dependencies:
+    - terraform:plan
   only:
     - main
+    - master
+  when: manual  # Require manual approval for deployment
+
+# Optional: Destroy infrastructure (manual trigger only)
+terraform:destroy:
+  stage: deploy
+  script:
+    - terraform destroy -auto-approve
+  only:
+    - main
+    - master
+  when: manual
+  allow_failure: false
