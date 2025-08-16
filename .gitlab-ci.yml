@@ -6,7 +6,7 @@ stages:
 
 variables:
   TERRAFORM_VERSION: "1.5.7"
-  TF_ROOT: "infrastructure/terraform"  # Change this to your terraform directory
+  TF_ROOT: "Livrables/EKS-TF"  # Change this to your terraform directory
   TF_STATE_NAME: "default"
   AWS_DEFAULT_REGION: "us-east-1"      # Change to your preferred region
   TF_CLI_CONFIG_FILE: "/tmp/.terraformrc"
