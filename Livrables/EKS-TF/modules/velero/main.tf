@@ -1,6 +1,6 @@
 module "aws_s3_bucket" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "4.1.1"
+  # version = "4.1.1"
   bucket  = var.bucket_name
   acl     = "private"
   force_destroy = true

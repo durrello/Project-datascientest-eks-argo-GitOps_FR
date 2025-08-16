@@ -29,7 +29,7 @@ resource "helm_release" "argocd-apps" {
   repository = "https://argoproj.github.io/argo-helm"
   chart      = "argocd-apps"
   namespace  = "argocd"
-  version    = "2.0.0"
+  version    = "6.9.0"
 
   values = [
     templatefile("${path.module}/template/application_values.yaml", {
