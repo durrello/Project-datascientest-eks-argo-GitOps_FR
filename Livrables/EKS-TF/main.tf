@@ -44,9 +44,9 @@ provider "kubectl" {
 
 terraform {
   cloud {
-    organization = "olivier-devops"
+    organization = "durrell"
     workspaces {
-      name = "end-end-gitops"
+      name = "end-to-end-gitops"
     }
   }
   required_providers {
