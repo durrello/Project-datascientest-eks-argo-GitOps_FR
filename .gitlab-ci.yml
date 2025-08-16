@@ -6,9 +6,10 @@ stages:
 
 variables:
   TERRAFORM_VERSION: "1.5.7"
-  TF_ROOT: "Livrables/EKS-TF"  # Change this to your terraform directory
+  TF_ROOT: "infrastructure/terraform"  # Change this to your terraform directory
   TF_STATE_NAME: "default"
   AWS_DEFAULT_REGION: "us-east-1"      # Change to your preferred region
+  TF_CLI_CONFIG_FILE: "/tmp/.terraformrc"
 
 # Use official terraform image
 image:
@@ -20,7 +21,16 @@ image:
 before_script:
   - cd $TF_ROOT
   - terraform --version
-  - terraform init
+  # Setup Terraform Cloud credentials if using Terraform Cloud
+  - |
+    if [ ! -z "$TF_API_TOKEN" ]; then
+      echo "Setting up Terraform Cloud credentials..."
+      mkdir -p ~/.terraform.d
+      echo "credentials \"app.terraform.io\" { token = \"$TF_API_TOKEN\" }" > ~/.terraform.d/credentials.tfrc.json
+      echo 'credentials "app.terraform.io" { token = "'$TF_API_TOKEN'" }' > /tmp/.terraformrc
+    fi
+  # Initialize with backend configuration
+  - terraform init -backend=true
 
 # Validate terraform configuration
 terraform:validate:
