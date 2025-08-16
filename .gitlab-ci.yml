@@ -8,7 +8,7 @@ variables:
   TF_WORKSPACE: $TF_WORKSPACE               # Set in GitLab CI/CD variables
   TF_TOKEN_app_terraform_io: $TF_API_TOKEN  # Set in GitLab CI/CD variables
   AWS_REGION: $AWS_REGION                   # Set in GitLab CI/CD variables
-  IAM_ROLE: $IAM_ROLE                        # Set in GitLab CI/CD variables
+  IAM_ROLE: $IAM_ROLE                       # Set in GitLab CI/CD variables
 
 default:
   # Use Alpine Linux with curl and jq pre-installed instead of terraform image
