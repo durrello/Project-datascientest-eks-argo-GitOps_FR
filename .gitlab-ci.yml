@@ -10,7 +10,7 @@ variables:
   IAM_ROLE: $IAM_ROLE                        # Set in GitLab CI/CD variables
 
 default:
-  image: curlimages/curl:8.7.1  # lightweight image for API calls
+  image: hashicorp/terraform:1.9.5  # lightweight image for API calls
 
 before_script:
   # Authenticate to AWS using OIDC
