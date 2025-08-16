@@ -1,3 +1,4 @@
+# .gitlab-ci.yml - Fixed version
 stages:
   - plan
   - apply
@@ -10,46 +11,121 @@ variables:
   IAM_ROLE: $IAM_ROLE                        # Set in GitLab CI/CD variables
 
 default:
-  image: hashicorp/terraform:1.9.5  # lightweight image for API calls
+  # Use Alpine Linux with curl and jq pre-installed instead of terraform image
+  image: alpine:latest
 
 before_script:
+  # Install required packages
+  - apk add --no-cache python3 py3-pip jq bash curl terraform aws-cli
   # Authenticate to AWS using OIDC
-  - apk add --no-cache python3 py3-pip jq bash
-  - pip3 install awscli
   - |
     aws sts assume-role-with-web-identity \
       --role-arn "$IAM_ROLE" \
       --role-session-name "GitLab_to_AWS_via_FederatedOIDC" \
       --web-identity-token $CI_JOB_JWT_V2 \
       --duration-seconds 3600 > /tmp/creds.json
-    export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' /tmp/creds.json)
-    export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' /tmp/creds.json)
-    export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' /tmp/creds.json)
+  - export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' /tmp/creds.json)
+  - export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' /tmp/creds.json)
+  - export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' /tmp/creds.json)
+  - echo "AWS credentials configured successfully"
 
 plan:
   stage: plan
   script:
+    - echo "Starting Terraform Cloud plan process..."
+    
+    # Create Terraform Cloud configuration version
     - |
-      # Create Terraform Cloud configuration version
-      CONFIG_VERSION_ID=$(curl -s -X POST \
+      echo "Creating configuration version..."
+      RESPONSE=$(curl -s -X POST \
         -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
         -H "Content-Type: application/vnd.api+json" \
         -d '{"data":{"type":"configuration-versions"}}' \
-        https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/$TF_WORKSPACE/configuration-versions | jq -r '.data.id')
-      echo "CONFIG_VERSION_ID=$CONFIG_VERSION_ID" >> plan.env
+        https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/$TF_WORKSPACE/configuration-versions)
+      
+      CONFIG_VERSION_ID=$(echo $RESPONSE | jq -r '.data.id')
+      UPLOAD_URL=$(echo $RESPONSE | jq -r '.data.attributes."upload-url"')
+      
+      if [ "$CONFIG_VERSION_ID" = "null" ]; then
+        echo "Failed to create configuration version"
+        echo "Response: $RESPONSE"
+        exit 1
+      fi
+      
+      echo "Configuration version created: $CONFIG_VERSION_ID"
+      echo "CONFIG_VERSION_ID=$CONFIG_VERSION_ID" > plan.env
+      echo "UPLOAD_URL=$UPLOAD_URL" >> plan.env
 
-      # Create a plan run
-      PLAN_RUN_ID=$(curl -s -X POST \
+    # Upload configuration files to Terraform Cloud
+    - |
+      echo "Uploading configuration files..."
+      # Create a tar.gz of the terraform directory
+      tar -czf config.tar.gz -C terraform .
+      
+      # Upload the configuration
+      curl -X PUT \
+        -H "Content-Type: application/octet-stream" \
+        --data-binary @config.tar.gz \
+        "$UPLOAD_URL"
+      
+      echo "Configuration uploaded successfully"
+
+    # Create a plan run
+    - |
+      echo "Creating plan run..."
+      PLAN_RESPONSE=$(curl -s -X POST \
         -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
         -H "Content-Type: application/vnd.api+json" \
-        -d "{\"data\":{\"attributes\":{\"is-destroy\":false,\"message\":\"Plan triggered from GitLab CI\"},\"type\":\"runs\",\"relationships\":{\"workspace\":{\"data\":{\"type\":\"workspaces\",\"id\":\"$TF_WORKSPACE\"}},\"configuration-version\":{\"data\":{\"type\":\"configuration-versions\",\"id\":\"$CONFIG_VERSION_ID\"}}}}}" \
-        https://app.terraform.io/api/v2/runs | jq -r '.data.id')
+        -d "{\"data\":{\"attributes\":{\"is-destroy\":false,\"message\":\"Plan triggered from GitLab CI - Commit: $CI_COMMIT_SHA\"},\"type\":\"runs\",\"relationships\":{\"workspace\":{\"data\":{\"type\":\"workspaces\",\"id\":\"$TF_WORKSPACE\"}},\"configuration-version\":{\"data\":{\"type\":\"configuration-versions\",\"id\":\"$CONFIG_VERSION_ID\"}}}}}" \
+        https://app.terraform.io/api/v2/runs)
+      
+      PLAN_RUN_ID=$(echo $PLAN_RESPONSE | jq -r '.data.id')
+      
+      if [ "$PLAN_RUN_ID" = "null" ]; then
+        echo "Failed to create plan run"
+        echo "Response: $PLAN_RESPONSE"
+        exit 1
+      fi
+      
       echo "PLAN_RUN_ID=$PLAN_RUN_ID" >> plan.env
       echo "Terraform plan run created: $PLAN_RUN_ID"
+
+    # Wait for plan to complete
+    - |
+      echo "Waiting for plan to complete..."
+      STATUS=""
+      COUNTER=0
+      MAX_ATTEMPTS=60  # 10 minutes max
+      
+      while [[ "$STATUS" != "planned" && "$STATUS" != "errored" && "$STATUS" != "canceled" ]]; do
+        if [ $COUNTER -gt $MAX_ATTEMPTS ]; then
+          echo "Plan timed out after $MAX_ATTEMPTS attempts"
+          exit 1
+        fi
+        
+        sleep 10
+        STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID)
+        STATUS=$(echo $STATUS_RESPONSE | jq -r '.data.attributes.status')
+        
+        echo "Plan status: $STATUS"
+        COUNTER=$((COUNTER + 1))
+      done
+      
+      if [[ "$STATUS" == "errored" || "$STATUS" == "canceled" ]]; then
+        echo "Plan failed with status: $STATUS"
+        exit 1
+      fi
+      
+      echo "Plan completed successfully with status: $STATUS"
 
   artifacts:
     reports:
       dotenv: plan.env
+    expire_in: 1 hour
+  only:
+    - main
+    - merge_requests
 
 apply:
   stage: apply
@@ -57,28 +133,83 @@ apply:
   dependencies:
     - plan
   script:
+    - echo "Starting Terraform Cloud apply process..."
     - source plan.env
+    
+    # Confirm and apply the run
     - |
-      # Confirm the run in Terraform Cloud
-      curl -X POST \
+      echo "Confirming and applying run: $PLAN_RUN_ID"
+      APPLY_RESPONSE=$(curl -s -X POST \
         -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
         -H "Content-Type: application/vnd.api+json" \
-        -d '{"data":{"type":"runs","attributes":{"is-confirmed":true}}}' \
-        https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID/actions/confirm
-      echo "Apply run confirmed for Run ID: $PLAN_RUN_ID"
+        https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID/actions/confirm)
+      
+      echo "Apply run confirmed"
+      echo "Response: $APPLY_RESPONSE"
 
-      # Optional: Poll run status until finished
+    # Poll run status until finished
+    - |
       echo "Polling Terraform Cloud run status..."
       STATUS=""
-      while [[ "$STATUS" != "planned_and_finished" && "$STATUS" != "applied" && "$STATUS" != "errored" ]]; do
+      COUNTER=0
+      MAX_ATTEMPTS=120  # 20 minutes max for apply
+      
+      while [[ "$STATUS" != "applied" && "$STATUS" != "errored" && "$STATUS" != "canceled" ]]; do
+        if [ $COUNTER -gt $MAX_ATTEMPTS ]; then
+          echo "Apply timed out after $MAX_ATTEMPTS attempts"
+          exit 1
+        fi
+        
         sleep 10
-        STATUS=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
-          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID | jq -r '.data.attributes.status')
-        echo "Current status: $STATUS"
+        STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID)
+        STATUS=$(echo $STATUS_RESPONSE | jq -r '.data.attributes.status')
+        
+        echo "Apply status: $STATUS (attempt $COUNTER/$MAX_ATTEMPTS)"
+        COUNTER=$((COUNTER + 1))
       done
-      echo "Terraform Cloud run finished with status: $STATUS"
-      if [[ "$STATUS" == "errored" ]]; then
-        echo "Terraform run failed!"
+      
+      if [[ "$STATUS" == "errored" || "$STATUS" == "canceled" ]]; then
+        echo "Apply failed with status: $STATUS"
+        
+        # Get error details
+        ERROR_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID)
+        echo "Error details: $ERROR_RESPONSE"
         exit 1
       fi
-      echo "Terraform run applied successfully!"
+      
+      echo "Terraform apply completed successfully with status: $STATUS"
+      
+    # Get apply outputs
+    - |
+      echo "Retrieving Terraform outputs..."
+      OUTPUTS_RESPONSE=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+        https://app.terraform.io/api/v2/workspaces/$TF_WORKSPACE/current-state-version)
+      echo "Outputs available in Terraform Cloud workspace"
+
+  environment:
+    name: production
+  only:
+    - main
+
+# Alternative job for local Terraform execution (if needed)
+terraform-local:
+  stage: plan
+  image: hashicorp/terraform:1.9.5
+  variables:
+    TF_IN_AUTOMATION: "true"
+  before_script:
+    - cd terraform
+    - terraform --version
+    - terraform init
+  script:
+    - terraform validate
+    - terraform plan -out=tfplan
+  artifacts:
+    paths:
+      - terraform/tfplan
+    expire_in: 1 week
+  when: manual
+  only:
+    - main
