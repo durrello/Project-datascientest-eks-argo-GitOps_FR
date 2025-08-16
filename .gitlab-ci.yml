@@ -1,4 +1,4 @@
-# .gitlab-ci.yml - Fixed version
+# .gitlab-ci.yml - Fixed version.
 stages:
   - plan
   - apply
