@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
       - name: reddit-clone
-        image: fallewi/reddit:7
+        image: fallewi/reddit:6
         ports:
         - containerPort: 3000

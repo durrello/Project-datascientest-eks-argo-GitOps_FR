@@ -1,0 +1,84 @@
+stages:
+  - plan
+  - apply
+
+variables:
+  TF_CLOUD_ORGANIZATION: "Cashnow"
+  TF_WORKSPACE: $TF_WORKSPACE               # Set in GitLab CI/CD variables
+  TF_TOKEN_app_terraform_io: $TF_API_TOKEN  # Set in GitLab CI/CD variables
+  AWS_REGION: $AWS_REGION                    # Set in GitLab CI/CD variables
+  IAM_ROLE: $IAM_ROLE                        # Set in GitLab CI/CD variables
+
+default:
+  image: curlimages/curl:8.3.1  # lightweight image for API calls
+
+before_script:
+  # Authenticate to AWS using OIDC
+  - apk add --no-cache python3 py3-pip jq bash
+  - pip3 install awscli
+  - |
+    aws sts assume-role-with-web-identity \
+      --role-arn "$IAM_ROLE" \
+      --role-session-name "GitLab_to_AWS_via_FederatedOIDC" \
+      --web-identity-token $CI_JOB_JWT_V2 \
+      --duration-seconds 3600 > /tmp/creds.json
+    export AWS_ACCESS_KEY_ID=$(jq -r '.Credentials.AccessKeyId' /tmp/creds.json)
+    export AWS_SECRET_ACCESS_KEY=$(jq -r '.Credentials.SecretAccessKey' /tmp/creds.json)
+    export AWS_SESSION_TOKEN=$(jq -r '.Credentials.SessionToken' /tmp/creds.json)
+
+plan:
+  stage: plan
+  script:
+    - |
+      # Create Terraform Cloud configuration version
+      CONFIG_VERSION_ID=$(curl -s -X POST \
+        -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+        -H "Content-Type: application/vnd.api+json" \
+        -d '{"data":{"type":"configuration-versions"}}' \
+        https://app.terraform.io/api/v2/organizations/$TF_CLOUD_ORGANIZATION/workspaces/$TF_WORKSPACE/configuration-versions | jq -r '.data.id')
+      echo "CONFIG_VERSION_ID=$CONFIG_VERSION_ID" >> plan.env
+
+      # Create a plan run
+      PLAN_RUN_ID=$(curl -s -X POST \
+        -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+        -H "Content-Type: application/vnd.api+json" \
+        -d "{\"data\":{\"attributes\":{\"is-destroy\":false,\"message\":\"Plan triggered from GitLab CI\"},\"type\":\"runs\",\"relationships\":{\"workspace\":{\"data\":{\"type\":\"workspaces\",\"id\":\"$TF_WORKSPACE\"}},\"configuration-version\":{\"data\":{\"type\":\"configuration-versions\",\"id\":\"$CONFIG_VERSION_ID\"}}}}}" \
+        https://app.terraform.io/api/v2/runs | jq -r '.data.id')
+      echo "PLAN_RUN_ID=$PLAN_RUN_ID" >> plan.env
+      echo "Terraform plan run created: $PLAN_RUN_ID"
+
+  artifacts:
+    reports:
+      dotenv: plan.env
+
+apply:
+  stage: apply
+  when: manual
+  dependencies:
+    - plan
+  script:
+    - source plan.env
+    - |
+      # Confirm the run in Terraform Cloud
+      curl -X POST \
+        -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+        -H "Content-Type: application/vnd.api+json" \
+        -d '{"data":{"type":"runs","attributes":{"is-confirmed":true}}}' \
+        https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID/actions/confirm
+      echo "Apply run confirmed for Run ID: $PLAN_RUN_ID"
+
+      # Optional: Poll run status until finished
+      echo "Polling Terraform Cloud run status..."
+      STATUS=""
+      while [[ "$STATUS" != "planned_and_finished" && "$STATUS" != "applied" && "$STATUS" != "errored" ]]; do
+        sleep 10
+        STATUS=$(curl -s -H "Authorization: Bearer $TF_TOKEN_app_terraform_io" \
+          https://app.terraform.io/api/v2/runs/$PLAN_RUN_ID | jq -r '.data.attributes.status')
+        echo "Current status: $STATUS"
+      done
+      echo "Terraform Cloud run finished with status: $STATUS"
+      if [[ "$STATUS" == "errored" ]]; then
+        echo "Terraform run failed!"
+        exit 1
+      fi
+      echo "Terraform run applied successfully!"
