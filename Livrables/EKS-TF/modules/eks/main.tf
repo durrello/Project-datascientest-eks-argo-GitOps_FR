@@ -50,18 +50,18 @@ module "eks" {
   tags = {
     env       = var.profile
     terraform = "true"
-    type      = "fall-project-eks"
+    type      = "end-end-gitops"
   }
 }
 
-module "aws_auth" {
-  source = "terraform-aws-modules/eks/aws//modules/aws-auth"
-  manage_aws_auth_configmap = true
-  aws_auth_roles = [
-    {
-      rolearn  = var.eks_admins_iam_role.iam_role_arn
-      username = var.eks_admins_iam_role.iam_role_name
-      groups   = ["system:masters"]
-    },
-  ]
-}
+# module "aws_auth" {
+#   source = "terraform-aws-modules/eks/aws//modules/aws-auth"
+#   manage_aws_auth_configmap = true
+#   aws_auth_roles = [
+#     {
+#       rolearn  = var.eks_admins_iam_role.iam_role_arn
+#       username = var.eks_admins_iam_role.iam_role_name
+#       groups   = ["system:masters"]
+#     },
+#   ]
+# }

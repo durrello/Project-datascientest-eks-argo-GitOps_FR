@@ -44,6 +44,10 @@ provider "kubectl" {
 
 terraform {
   cloud {
+    organization = "olivier-devops"
+    workspaces {
+      name = "end-end-gitops"
+    }
   }
   required_providers {
     aws = {
@@ -62,7 +66,8 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.12.0"
     }
-  }
+  } 
+  
 }
 
 resource "kubernetes_namespace" "fall-project" {
