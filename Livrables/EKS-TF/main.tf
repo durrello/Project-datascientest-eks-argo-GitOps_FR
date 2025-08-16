@@ -52,7 +52,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 5.0"  # Remove conflicting constraints
     }
     kubernetes = {
       source  = "hashicorp/kubernetes"
@@ -60,14 +60,18 @@ terraform {
     }
     kubectl = {
       source  = "alekc/kubectl"
-      version = ">= 2.0.2"
+      version = "~> 2.0"  # Simplified constraint
     }
     helm = {
       source  = "hashicorp/helm"
       version = "~> 2.12.0"
     }
-  } 
-  
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.13.0"
+    }
+  }
+  required_version = ">= 1.5.0"
 }
 
 resource "kubernetes_namespace" "fall-project" {

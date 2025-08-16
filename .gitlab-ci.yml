@@ -5,10 +5,10 @@ stages:
   - deploy
 
 variables:
-  TERRAFORM_VERSION: "1.5.7"
-  TF_ROOT: "Livrables/EKS-TF"  # Change this to your terraform directory
+  TERRAFORM_VERSION: "1.6.0"  # Updated to newer version
+  TF_ROOT: "Livrables/EKS-TF"  # Your terraform directory
   TF_STATE_NAME: "default"
-  AWS_DEFAULT_REGION: "us-east-1"      # Change to your preferred region
+  AWS_DEFAULT_REGION: "us-east-1"
   TF_CLI_CONFIG_FILE: "/tmp/.terraformrc"
 
 # Use official terraform image
