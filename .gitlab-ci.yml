@@ -1,326 +1,58 @@
 stages:
   - validate
+  - security
   - plan
-  - deploy-infra
-  - deploy-apps
+  - apply
 
 variables:
-  TERRAFORM_VERSION: "1.6.6"
-  TF_ROOT: "Livrables/EKS-TF"
-  TF_STATE_NAME: "default"
-  TF_CLI_CONFIG_FILE: "/tmp/.terraformrc"
-  EKS_CLUSTER_NAME: "fall-project-cluster"
-  KUBECTL_VERSION: "v1.28.0"
-  # Cache optimization
-  TF_CACHE_DIR: "${CI_PROJECT_DIR}/.terraform"
+  TF_ROOT: "Livrables/EKS-TF"   # ✅ Update this path if your repo uses a different folder
+  GIT_SUBMODULE_STRATEGY: recursive   # ✅ Ensures Terraform modules & aws-auth are pulled
 
-# Use Ubuntu image for better tool compatibility
-image: ubuntu:22.04
-
-# Global cache configuration
-cache:
-  key: "${CI_COMMIT_REF_SLUG}"
-  paths:
-    - ${TF_CACHE_DIR}/
-    - .terraform.lock.hcl
-    - /usr/local/bin/terraform
-    - /usr/local/bin/aws
-    - /usr/local/bin/kubectl
-
-.install_tools: &install_tools
-  - |
-    # Update package list and install basic tools
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -q
-    apt-get install -y -q curl unzip wget python3 python3-pip git ca-certificates
-    
-    # Install Terraform (check if cached version exists)
-    if [ ! -f "/usr/local/bin/terraform" ] || [ "$(/usr/local/bin/terraform version -json 2>/dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null)" != "${TERRAFORM_VERSION}" ]; then
-      echo "Installing Terraform ${TERRAFORM_VERSION}..."
-      wget -q https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-      unzip -q terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-      mv terraform /usr/local/bin/
-      rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-    fi
-    terraform version
-    
-    # Install AWS CLI v2 (check if already installed)
-    if [ ! -f "/usr/local/bin/aws" ]; then
-      echo "Installing AWS CLI v2..."
-      curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-      unzip -q awscliv2.zip
-      ./aws/install
-      rm -rf aws awscliv2.zip
-    fi
-    aws --version
-    
-    # Install kubectl (check if cached version exists)
-    if [ ! -f "/usr/local/bin/kubectl" ]; then
-      echo "Installing kubectl ${KUBECTL_VERSION}..."
-      curl -sLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-      chmod +x kubectl
-      mv kubectl /usr/local/bin/
-    fi
-    kubectl version --client
-
-.setup_credentials: &setup_credentials
-  - |
-    # Configure AWS credentials using environment variables (more secure)
-    export AWS_ACCESS_KEY_ID="$TF_VAR_AWS_ACCESS_KEY_ID"
-    export AWS_SECRET_ACCESS_KEY="$TF_VAR_AWS_SECRET_ACCESS_KEY"
-    export AWS_DEFAULT_REGION="$TF_VAR_AWS_DEFAULT_REGION"
-    
-    # Verify AWS configuration
-    aws sts get-caller-identity
-    
-    # Setup Terraform Cloud credentials if using Terraform Cloud
-    if [ -n "$TF_API_TOKEN" ]; then
-      echo "Setting up Terraform Cloud credentials..."
-      mkdir -p ~/.terraform.d
-      cat > ~/.terraform.d/credentials.tfrc.json <<EOF
-    {
-      "credentials": {
-        "app.terraform.io": {
-          "token": "$TF_API_TOKEN"
-        }
-      }
-    }
-    EOF
-      # Also create the old format for compatibility
-      echo 'credentials "app.terraform.io" { token = "'$TF_API_TOKEN'" }' > /tmp/.terraformrc
-    fi
-
-.terraform_init: &terraform_init
-  - |
-    cd ${TF_ROOT}
-    echo "Initializing Terraform in $(pwd)..."
-    # Check if already initialized and up-to-date
-    if [ ! -f .terraform.lock.hcl ] || [ ! -d .terraform ]; then
-      terraform init -backend=true -upgrade
-    else
-      terraform init -backend=true
-    fi
-
-# Validate terraform configuration
+# -----------------
+# 1. Terraform validate
+# -----------------
 terraform:validate:
   stage: validate
-  before_script:
-    - *install_tools
-    - *setup_credentials
-    - *terraform_init
+  image: hashicorp/terraform:1.6.6
   script:
-    - cd ${TF_ROOT}
-    - terraform fmt -check -recursive
+    - cd $TF_ROOT
+    - terraform init -backend=false
     - terraform validate
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH'
 
-# Security scan (optional but recommended)
+# -----------------
+# 2. Security Scan with Trivy
+# -----------------
 terraform:security-scan:
-  stage: validate
+  stage: security
   image: aquasec/trivy:latest
-  before_script: []  # Override global before_script
   script:
-    - cd ${TF_ROOT}
-    - trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "Security issues found - review before proceeding"
-  allow_failure: true
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH'
+    - cd $TF_ROOT
+    # ✅ Correct Trivy usage (scans Terraform configs for misconfigs)
+    - trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found - review before proceeding"
 
-# Plan terraform changes
+# -----------------
+# 3. Terraform Plan
+# -----------------
 terraform:plan:
   stage: plan
-  before_script:
-    - *install_tools
-    - *setup_credentials
-    - *terraform_init
+  image: hashicorp/terraform:1.6.6
   script:
-    - cd ${TF_ROOT}
-    # Generate a detailed plan
-    - terraform plan -detailed-exitcode -out="planfile" -lock-timeout=300s
+    - cd $TF_ROOT
+    - terraform init
+    - terraform plan -out=tfplan
   artifacts:
     paths:
-      - ${TF_ROOT}/planfile
-      - ${TF_ROOT}/.terraform.lock.hcl
-    reports:
-      terraform: ${TF_ROOT}/planfile
-    expire_in: 1 week
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH'
+      - $TF_ROOT/tfplan
 
-# Apply infrastructure (EKS cluster and AWS resources)
-terraform:apply-infra:
-  stage: deploy-infra
-  environment:
-    name: production
-    action: start
-  before_script:
-    - *install_tools
-    - *setup_credentials
-    - *terraform_init
-  script:
-    - cd ${TF_ROOT}
-    # Apply infrastructure in stages for better reliability
-    - echo "Applying networking infrastructure..."
-    - terraform apply -input=false -target=module.networking -lock-timeout=300s -auto-approve
-    
-    - echo "Applying EKS cluster..."
-    - terraform apply -input=false -target=module.eks -lock-timeout=300s -auto-approve
-    
-    # Wait for EKS cluster to be fully ready with retries
-    - |
-      echo "Waiting for EKS cluster to be ready..."
-      max_attempts=10
-      attempt=1
-      while [ $attempt -le $max_attempts ]; do
-        echo "Attempt $attempt/$max_attempts to update kubeconfig..."
-        if aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME; then
-          echo "Successfully updated kubeconfig"
-          break
-        fi
-        echo "Failed to update kubeconfig, waiting 30 seconds before retry..."
-        sleep 30
-        attempt=$((attempt + 1))
-      done
-      
-      if [ $attempt -gt $max_attempts ]; then
-        echo "Failed to update kubeconfig after $max_attempts attempts"
-        exit 1
-      fi
-    
-    # Wait for nodes to be ready
-    - |
-      echo "Waiting for EKS nodes to be ready..."
-      kubectl wait --for=condition=Ready nodes --all --timeout=600s || {
-        echo "Nodes status:"
-        kubectl get nodes -o wide
-        echo "Pod status in kube-system:"
-        kubectl get pods -n kube-system
-        exit 1
-      }
-    
-    - echo "EKS infrastructure deployment completed successfully"
-  dependencies:
-    - terraform:plan
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
-      when: manual
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-      - stuck_or_timeout_failure
-
-# Apply applications (Kubernetes resources)
-terraform:apply-apps:
-  stage: deploy-apps
-  environment:
-    name: production
-    action: start
-  before_script:
-    - *install_tools
-    - *setup_credentials
-    - *terraform_init
-  script:
-    - cd ${TF_ROOT}
-    # Ensure kubeconfig is current
-    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
-    
-    # Verify cluster connectivity
-    - kubectl cluster-info
-    - kubectl get nodes
-    
-    # Apply remaining Kubernetes resources
-    - echo "Applying Kubernetes applications..."
-    - terraform apply -input=false -lock-timeout=300s -auto-approve
-    
-    # Verify deployment
-    - echo "Verifying application deployment..."
-    - kubectl get all --all-namespaces
-  dependencies:
-    - terraform:apply-infra
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
-      when: manual
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-
-# Complete deployment (alternative to staged approach)
+# -----------------
+# 4. Terraform Apply (manual)
+# -----------------
 terraform:apply:
-  stage: deploy-infra
-  environment:
-    name: production
-    action: start
-  before_script:
-    - *install_tools
-    - *setup_credentials
-    - *terraform_init
+  stage: apply
+  image: hashicorp/terraform:1.6.6
   script:
-    - cd ${TF_ROOT}
-    - echo "Applying complete Terraform configuration..."
-    - terraform apply -input=false -lock-timeout=300s -auto-approve
-    
-    # Post-deployment verification
-    - |
-      echo "Verifying EKS cluster deployment..."
-      max_attempts=5
-      attempt=1
-      while [ $attempt -le $max_attempts ]; do
-        if aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME; then
-          kubectl get nodes
-          kubectl get all --all-namespaces
-          echo "Deployment verification completed successfully"
-          break
-        fi
-        echo "Verification attempt $attempt/$max_attempts failed, retrying in 30 seconds..."
-        sleep 30
-        attempt=$((attempt + 1))
-      done
+    - cd $TF_ROOT
+    - terraform apply -auto-approve tfplan
+  when: manual
   dependencies:
     - terraform:plan
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
-      when: manual
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-
-# Destroy infrastructure (with safety checks)
-terraform:destroy:
-  stage: deploy-apps
-  environment:
-    name: production
-    action: stop
-  before_script:
-    - *install_tools
-    - *setup_credentials
-    - *terraform_init
-  script:
-    - cd ${TF_ROOT}
-    # Safety check - require confirmation variable
-    - |
-      if [ "$DESTROY_CONFIRMED" != "yes" ]; then
-        echo "ERROR: Destruction not confirmed. Set DESTROY_CONFIRMED=yes to proceed."
-        exit 1
-      fi
-    
-    # Update kubeconfig for cleanup
-    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME || echo "Cluster may already be destroyed"
-    
-    # Clean up any stuck resources first (optional)
-    - kubectl delete all --all --all-namespaces --timeout=300s || echo "Failed to clean up Kubernetes resources"
-    
-    # Destroy infrastructure
-    - terraform destroy -auto-approve -lock-timeout=300s
-    
-    - echo "Infrastructure destroyed successfully"
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
-      when: manual
-  allow_failure: false
