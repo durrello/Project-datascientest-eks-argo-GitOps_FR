@@ -19,7 +19,7 @@ before_script:
   # Update package list
   - apt-get update -y
   # Install required packages
-  - apt-get install -y curl unzip wget python3 python3-pip
+  - apt-get install -y curl unzip wget python3 python3-pip git
   # Install Terraform
   - wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
   - unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
