@@ -9,9 +9,11 @@ variables:
   GIT_SUBMODULE_STRATEGY: recursive
 
 default:
-  image: hashicorp/terraform:1.6.6
+  image: alpine:3.18
   before_script:
-    - echo "Running job in $CI_JOB_STAGE stage"
+    - apk add --no-cache bash curl unzip
+    - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
+    - unzip terraform.zip -d /usr/local/bin/
 
 # -----------------
 # 1. Terraform validate
