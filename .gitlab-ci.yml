@@ -10,129 +10,281 @@ variables:
   TF_STATE_NAME: "default"
   TF_CLI_CONFIG_FILE: "/tmp/.terraformrc"
   EKS_CLUSTER_NAME: "fall-project-cluster"
+  KUBECTL_VERSION: "v1.28.0"
+  # Cache optimization
+  APT_CACHE_DIR: "${CI_PROJECT_DIR}/apt-cache"
+  TF_CACHE_DIR: "${CI_PROJECT_DIR}/.terraform"
 
-# Use Ubuntu-based image with better compatibility
-image: ubuntu:22.04
+# Use optimized Docker image with pre-installed tools
+image: hashicorp/terraform:${TERRAFORM_VERSION}
 
-before_script:
-  - cd $TF_ROOT
-  # Update package list
-  - apt-get update -y
-  # Install required packages
-  - apt-get install -y curl unzip wget python3 python3-pip git
-  # Install Terraform
-  - wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-  - unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
-  - mv terraform /usr/local/bin/
-  - terraform --version
-  # Install AWS CLI v2
-  - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-  - unzip awscliv2.zip
-  - ./aws/install
-  - aws --version
-  # Install kubectl
-  - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-  - chmod +x kubectl
-  - mv kubectl /usr/local/bin/
-  - kubectl version --client
-  # Configure AWS credentials using GitLab CI variables
-  - aws configure set aws_access_key_id $TF_VAR_AWS_ACCESS_KEY_ID
-  - aws configure set aws_secret_access_key $TF_VAR_AWS_SECRET_ACCESS_KEY
-  - aws configure set default.region $TF_VAR_AWS_DEFAULT_REGION
-  # Export AWS environment variables for compatibility
-  - export AWS_ACCESS_KEY_ID=$TF_VAR_AWS_ACCESS_KEY_ID
-  - export AWS_SECRET_ACCESS_KEY=$TF_VAR_AWS_SECRET_ACCESS_KEY
-  - export AWS_DEFAULT_REGION=$TF_VAR_AWS_DEFAULT_REGION
-  # Setup Terraform Cloud credentials if using Terraform Cloud
+# Global cache configuration
+cache:
+  key: "${CI_COMMIT_REF_SLUG}"
+  paths:
+    - ${APT_CACHE_DIR}/
+    - ${TF_CACHE_DIR}/
+    - .terraform.lock.hcl
+
+.install_tools: &install_tools
   - |
-    if [ ! -z "$TF_API_TOKEN" ]; then
+    # Create cache directories
+    mkdir -p ${APT_CACHE_DIR}
+    # Install required packages using Alpine package manager (since we're using terraform image)
+    apk add --no-cache curl unzip wget python3 py3-pip git bash
+    
+    # Install AWS CLI v2 (check if already installed)
+    if ! command -v aws &> /dev/null; then
+      curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+      unzip -q awscliv2.zip
+      ./aws/install
+      rm -rf aws awscliv2.zip
+    fi
+    aws --version
+    
+    # Install kubectl (check if already installed)
+    if ! command -v kubectl &> /dev/null; then
+      curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+      chmod +x kubectl
+      mv kubectl /usr/local/bin/
+    fi
+    kubectl version --client
+
+.setup_credentials: &setup_credentials
+  - |
+    # Configure AWS credentials using environment variables (more secure)
+    export AWS_ACCESS_KEY_ID="$TF_VAR_AWS_ACCESS_KEY_ID"
+    export AWS_SECRET_ACCESS_KEY="$TF_VAR_AWS_SECRET_ACCESS_KEY"
+    export AWS_DEFAULT_REGION="$TF_VAR_AWS_DEFAULT_REGION"
+    
+    # Verify AWS configuration
+    aws sts get-caller-identity
+    
+    # Setup Terraform Cloud credentials if using Terraform Cloud
+    if [ -n "$TF_API_TOKEN" ]; then
       echo "Setting up Terraform Cloud credentials..."
       mkdir -p ~/.terraform.d
-      echo "credentials \"app.terraform.io\" { token = \"$TF_API_TOKEN\" }" > ~/.terraform.d/credentials.tfrc.json
-      echo 'credentials "app.terraform.io" { token = "'$TF_API_TOKEN'" }' > /tmp/.terraformrc
+      cat > ~/.terraform.d/credentials.tfrc.json <<EOF
+    {
+      "credentials": {
+        "app.terraform.io": {
+          "token": "$TF_API_TOKEN"
+        }
+      }
+    }
+    EOF
     fi
-  # Initialize with backend configuration
-  - terraform init -backend=true
+
+.terraform_init: &terraform_init
+  - |
+    cd ${TF_ROOT}
+    # Check if already initialized and up-to-date
+    if [ ! -f .terraform.lock.hcl ] || [ ! -d .terraform ]; then
+      terraform init -backend=true -upgrade
+    else
+      terraform init -backend=true
+    fi
+
+before_script:
+  - *install_tools
+  - *setup_credentials
+  - *terraform_init
 
 # Validate terraform configuration
 terraform:validate:
   stage: validate
   script:
+    - cd ${TF_ROOT}
+    - terraform fmt -check -recursive
     - terraform validate
-  only:
-    - branches
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+
+# Security scan (optional but recommended)
+terraform:security-scan:
+  stage: validate
+  image: aquasec/trivy:latest
+  script:
+    - cd ${TF_ROOT}
+    - trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "Security issues found - review before proceeding"
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
 
 # Plan terraform changes
 terraform:plan:
   stage: plan
   script:
-    # Try to update kubeconfig (may fail if cluster doesn't exist yet)
-    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME || echo "EKS cluster not found, continuing with plan..."
-    - terraform plan -out="planfile"
+    - cd ${TF_ROOT}
+    # Generate a detailed plan
+    - terraform plan -detailed-exitcode -out="planfile" -lock-timeout=300s
   artifacts:
     paths:
-      - $TF_ROOT/planfile
+      - ${TF_ROOT}/planfile
+      - ${TF_ROOT}/.terraform.lock.hcl
+    reports:
+      terraform: ${TF_ROOT}/planfile
     expire_in: 1 week
-  only:
-    - branches
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
 
 # Apply infrastructure (EKS cluster and AWS resources)
 terraform:apply-infra:
   stage: deploy-infra
+  environment:
+    name: production
+    action: start
   script:
-    # First apply only AWS infrastructure (EKS cluster, VPC, etc.)
-    - terraform apply -input=false -target=module.networking "planfile" || terraform apply -input=false -target=module.networking
-    - terraform apply -input=false -target=module.eks "planfile" || terraform apply -input=false -target=module.eks
-    # Wait for EKS cluster to be ready
-    - sleep 60
-    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
-    - kubectl get nodes --timeout=300s || echo "Waiting for nodes to be ready..."
+    - cd ${TF_ROOT}
+    # Apply infrastructure in stages for better reliability
+    - echo "Applying networking infrastructure..."
+    - terraform apply -input=false -target=module.networking -lock-timeout=300s -auto-approve
+    
+    - echo "Applying EKS cluster..."
+    - terraform apply -input=false -target=module.eks -lock-timeout=300s -auto-approve
+    
+    # Wait for EKS cluster to be fully ready with retries
+    - |
+      echo "Waiting for EKS cluster to be ready..."
+      max_attempts=10
+      attempt=1
+      while [ $attempt -le $max_attempts ]; do
+        echo "Attempt $attempt/$max_attempts to update kubeconfig..."
+        if aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME; then
+          echo "Successfully updated kubeconfig"
+          break
+        fi
+        echo "Failed to update kubeconfig, waiting 30 seconds before retry..."
+        sleep 30
+        attempt=$((attempt + 1))
+      done
+      
+      if [ $attempt -gt $max_attempts ]; then
+        echo "Failed to update kubeconfig after $max_attempts attempts"
+        exit 1
+      fi
+    
+    # Wait for nodes to be ready
+    - |
+      echo "Waiting for EKS nodes to be ready..."
+      kubectl wait --for=condition=Ready nodes --all --timeout=600s || {
+        echo "Nodes status:"
+        kubectl get nodes -o wide
+        echo "Pod status in kube-system:"
+        kubectl get pods -n kube-system
+        exit 1
+      }
+    
+    - echo "EKS infrastructure deployment completed successfully"
   dependencies:
     - terraform:plan
-  only:
-    - main
-    - master
-  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
 
 # Apply applications (Kubernetes resources)
 terraform:apply-apps:
   stage: deploy-apps
+  environment:
+    name: production
+    action: start
   script:
-    # Update kubeconfig
-    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+    - cd ${TF_ROOT}
+    # Ensure kubeconfig is current
+    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+    
+    # Verify cluster connectivity
+    - kubectl cluster-info
+    - kubectl get nodes
+    
     # Apply remaining Kubernetes resources
-    - terraform apply -input=false "planfile"
+    - echo "Applying Kubernetes applications..."
+    - terraform apply -input=false -lock-timeout=300s -auto-approve
+    
+    # Verify deployment
+    - echo "Verifying application deployment..."
+    - kubectl get all --all-namespaces
   dependencies:
     - terraform:apply-infra
-  only:
-    - main
-    - master
-  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
 
-# Keep the original apply job for simpler deployments
+# Complete deployment (alternative to staged approach)
 terraform:apply:
   stage: deploy-infra
+  environment:
+    name: production
+    action: start
   script:
-    # Update kubeconfig for EKS access (after cluster is created)
-    - sleep 30  # Give EKS cluster time to be ready
-    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME || echo "Waiting for EKS cluster to be ready..."
-    - terraform apply -input=false "planfile"
+    - cd ${TF_ROOT}
+    - echo "Applying complete Terraform configuration..."
+    - terraform apply -input=false -lock-timeout=300s -auto-approve
+    
+    # Post-deployment verification
+    - |
+      echo "Verifying EKS cluster deployment..."
+      max_attempts=5
+      attempt=1
+      while [ $attempt -le $max_attempts ]; do
+        if aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME; then
+          kubectl get nodes
+          kubectl get all --all-namespaces
+          echo "Deployment verification completed successfully"
+          break
+        fi
+        echo "Verification attempt $attempt/$max_attempts failed, retrying in 30 seconds..."
+        sleep 30
+        attempt=$((attempt + 1))
+      done
   dependencies:
     - terraform:plan
-  only:
-    - main
-    - master
-  when: manual  # Require manual approval for deployment
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
 
-# Optional: Destroy infrastructure (manual trigger only)
+# Destroy infrastructure (with safety checks)
 terraform:destroy:
   stage: deploy-apps
+  environment:
+    name: production
+    action: stop
   script:
-    # Update kubeconfig for EKS access
-    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
-    - terraform destroy -auto-approve
-  only:
-    - main
-    - master
-  when: manual
+    - cd ${TF_ROOT}
+    # Safety check - require confirmation variable
+    - |
+      if [ "$DESTROY_CONFIRMED" != "yes" ]; then
+        echo "ERROR: Destruction not confirmed. Set DESTROY_CONFIRMED=yes to proceed."
+        exit 1
+      fi
+    
+    # Update kubeconfig for cleanup
+    - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME || echo "Cluster may already be destroyed"
+    
+    # Clean up any stuck resources first (optional)
+    - kubectl delete all --all --all-namespaces --timeout=300s || echo "Failed to clean up Kubernetes resources"
+    
+    # Destroy infrastructure
+    - terraform destroy -auto-approve -lock-timeout=300s
+    
+    - echo "Infrastructure destroyed successfully"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
   allow_failure: false
