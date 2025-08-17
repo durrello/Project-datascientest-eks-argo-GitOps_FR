@@ -9,20 +9,23 @@ variables:
   TF_ROOT: "Livrables/EKS-TF"
   TF_STATE_NAME: "default"
   TF_CLI_CONFIG_FILE: "/tmp/.terraformrc"
-  # EKS cluster name - update this to match your cluster name
   EKS_CLUSTER_NAME: "fall-project-cluster"
 
-# Use official terraform image with custom setup
-image:
-  name: hashicorp/terraform:$TERRAFORM_VERSION
-  entrypoint:
-    - '/usr/bin/env'
-    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+# Use Ubuntu-based image with better compatibility
+image: ubuntu:22.04
 
 before_script:
   - cd $TF_ROOT
+  # Update package list
+  - apt-get update -y
+  # Install required packages
+  - apt-get install -y curl unzip wget python3 python3-pip
+  # Install Terraform
+  - wget https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+  - unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+  - mv terraform /usr/local/bin/
+  - terraform --version
   # Install AWS CLI v2
-  - apk add --no-cache python3 py3-pip curl unzip
   - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
   - unzip awscliv2.zip
   - ./aws/install
@@ -31,18 +34,15 @@ before_script:
   - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
   - chmod +x kubectl
   - mv kubectl /usr/local/bin/
+  - kubectl version --client
   # Configure AWS credentials using GitLab CI variables
-  # Option 1: Using access keys
-  - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-  - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-  - aws configure set default.region $AWS_DEFAULT_REGION
-  
-  # Option 2: Using IAM role (uncomment if using OIDC/IAM roles)
-  # - export AWS_ROLE_ARN=$AWS_ROLE_ARN
-  # - export AWS_WEB_IDENTITY_TOKEN_FILE=$AWS_WEB_IDENTITY_TOKEN_FILE
-  # - export AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
-  # Verify terraform version
-  - terraform --version
+  - aws configure set aws_access_key_id $TF_VAR_AWS_ACCESS_KEY_ID
+  - aws configure set aws_secret_access_key $TF_VAR_AWS_SECRET_ACCESS_KEY
+  - aws configure set default.region $TF_VAR_AWS_DEFAULT_REGION
+  # Export AWS environment variables for compatibility
+  - export AWS_ACCESS_KEY_ID=$TF_VAR_AWS_ACCESS_KEY_ID
+  - export AWS_SECRET_ACCESS_KEY=$TF_VAR_AWS_SECRET_ACCESS_KEY
+  - export AWS_DEFAULT_REGION=$TF_VAR_AWS_DEFAULT_REGION
   # Setup Terraform Cloud credentials if using Terraform Cloud
   - |
     if [ ! -z "$TF_API_TOKEN" ]; then
