@@ -101,14 +101,13 @@ cache:
       terraform init -backend=true
     fi
 
-before_script:
-  - *install_tools
-  - *setup_credentials
-  - *terraform_init
-
 # Validate terraform configuration
 terraform:validate:
   stage: validate
+  before_script:
+    - *install_tools
+    - *setup_credentials
+    - *terraform_init
   script:
     - cd ${TF_ROOT}
     - terraform fmt -check -recursive
@@ -121,6 +120,7 @@ terraform:validate:
 terraform:security-scan:
   stage: validate
   image: aquasec/trivy:latest
+  before_script: []  # Override global before_script
   script:
     - cd ${TF_ROOT}
     - trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "Security issues found - review before proceeding"
@@ -132,6 +132,10 @@ terraform:security-scan:
 # Plan terraform changes
 terraform:plan:
   stage: plan
+  before_script:
+    - *install_tools
+    - *setup_credentials
+    - *terraform_init
   script:
     - cd ${TF_ROOT}
     # Generate a detailed plan
@@ -153,6 +157,10 @@ terraform:apply-infra:
   environment:
     name: production
     action: start
+  before_script:
+    - *install_tools
+    - *setup_credentials
+    - *terraform_init
   script:
     - cd ${TF_ROOT}
     # Apply infrastructure in stages for better reliability
@@ -212,6 +220,10 @@ terraform:apply-apps:
   environment:
     name: production
     action: start
+  before_script:
+    - *install_tools
+    - *setup_credentials
+    - *terraform_init
   script:
     - cd ${TF_ROOT}
     # Ensure kubeconfig is current
@@ -244,6 +256,10 @@ terraform:apply:
   environment:
     name: production
     action: start
+  before_script:
+    - *install_tools
+    - *setup_credentials
+    - *terraform_init
   script:
     - cd ${TF_ROOT}
     - echo "Applying complete Terraform configuration..."
@@ -281,6 +297,10 @@ terraform:destroy:
   environment:
     name: production
     action: stop
+  before_script:
+    - *install_tools
+    - *setup_credentials
+    - *terraform_init
   script:
     - cd ${TF_ROOT}
     # Safety check - require confirmation variable
