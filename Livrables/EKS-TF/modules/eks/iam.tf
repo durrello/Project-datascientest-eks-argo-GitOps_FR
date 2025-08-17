@@ -34,16 +34,16 @@ module "eks_admins_iam_role" {
   ]
 }
 
-# module "user_iam_user" {
-#   source  = "terraform-aws-modules/iam/aws//modules/iam-user"
-#   version = "5.3.1"
-#
-#   name                          = "student5_olivier_devops"
-#   create_iam_access_key         = false
-#   create_iam_user_login_profile = false
-#
-#   force_destroy = true
-# }
+module "user_iam_user" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-user"
+  version = "5.3.1"
+
+  name                          = "student5_olivier_devops"
+  create_iam_access_key         = false
+  create_iam_user_login_profile = false
+
+  force_destroy = true
+}
 
 module "allow_assume_eks_admins_iam_policy" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-policy"
@@ -75,4 +75,5 @@ module "eks_admins_iam_group" {
   create_group                      = true
   group_users                       = ["student5_olivier_devops"]
   custom_group_policy_arns          = [module.allow_assume_eks_admins_iam_policy.arn]
+  depends_on = [ module.user_iam_user ]
 }

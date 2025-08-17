@@ -1,14 +1,15 @@
 data "aws_availability_zones" "available" {}
 
 module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
-  name                             = "${var.namespace}-vpc"
-  cidr                             = "10.0.0.0/16"
-  azs                              = data.aws_availability_zones.available.names
-  private_subnets                  = ["10.0.0.0/24", "10.0.1.0/24"]
-  public_subnets                   = ["10.0.2.0/24", "10.0.3.0/24"]
-  create_database_subnet_group     = true
-  enable_nat_gateway               = true
+  source                       = "terraform-aws-modules/vpc/aws"
+  version                      = "5.8.1"
+  name                         = "${var.namespace}-vpc"
+  cidr                         = "10.0.0.0/16"
+  azs                          = data.aws_availability_zones.available.names
+  private_subnets              = ["10.0.0.0/24", "10.0.1.0/24"]
+  public_subnets               = ["10.0.2.0/24", "10.0.3.0/24"]
+  create_database_subnet_group = true
+  enable_nat_gateway           = true
   public_subnet_tags = {
     "kubernetes.io/role/elb" = "1"
   }

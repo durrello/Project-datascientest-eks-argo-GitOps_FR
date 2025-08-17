@@ -23,23 +23,6 @@ resource "helm_release" "argocd" {
   ]
 }
 
-resource "helm_release" "argocd-apps" {
-  name = "argocd-apps"
-
-  repository = "https://argoproj.github.io/argo-helm"
-  chart      = "argocd-apps"
-  namespace  = "argocd"
-  version    = "6.9.0"
-
-  values = [
-    templatefile("${path.module}/template/application_values.yaml", {
-      "fall-project_repo" = var.fall-project_repo
-    })
-  ]
-
-  depends_on = [helm_release.argocd]
-}
-
 data "kubernetes_service" "argocd_server" {
   metadata {
     name      = "argocd-server"

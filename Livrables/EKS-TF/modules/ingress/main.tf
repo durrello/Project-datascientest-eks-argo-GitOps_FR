@@ -1,6 +1,6 @@
 module "nginx-controller" {
   source  = "terraform-iaac/nginx-controller/helm"
-
+  version = "2.2.0"
   additional_set = [
     {
       name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
@@ -19,11 +19,11 @@ resource "kubernetes_ingress_v1" "fall-project-ingress" {
 
   wait_for_load_balancer = true
   metadata {
-    name        = "${var.namespace}-ingress"
-    namespace   = var.namespace
+    name      = "${var.namespace}-ingress"
+    namespace = var.namespace
     annotations = {
-      "cert-manager.io/cluster-issuer" = "letsencrypt-${var.profile}"
-      "kubernetes.io/tls-acme"         = "true"
+      "cert-manager.io/cluster-issuer"  = "letsencrypt-${var.profile}"
+      "kubernetes.io/tls-acme"          = "true"
       "nginx.org/client-max-body-size"  = "10m"
       "nginx.org/proxy-connect-timeout" = "75s"
       "nginx.org/proxy-read-timeout"    = "300s"
@@ -47,8 +47,8 @@ resource "kubernetes_ingress_v1" "fall-project-ingress" {
 
       http {
         path {
-          path       = "/()(.*)"
-          path_type  = "Prefix"
+          path      = "/()(.*)"
+          path_type = "Prefix"
           backend {
             service {
               name = "${var.namespace}-frontend-service"
@@ -60,8 +60,8 @@ resource "kubernetes_ingress_v1" "fall-project-ingress" {
         }
 
         path {
-          path       = "/server(/|$)(.*)"
-          path_type  = "Prefix"
+          path      = "/server(/|$)(.*)"
+          path_type = "Prefix"
           backend {
             service {
               name = "${var.namespace}-server-service"

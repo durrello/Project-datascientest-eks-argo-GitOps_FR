@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#aws eks update-kubeconfig --region eu-west-3 --name fall-project-cluster --profile eks_admin_role
+#aws eks update-kubeconfig --region us-east-1 --name fall-project-cluster --profile eks_admin_role
 
 export ARGO_PWD=`kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d`
 

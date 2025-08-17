@@ -1,16 +1,20 @@
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  # version = "~> 20.0"
+  version = "20.37.2"
 
-  cluster_name    = var.cluster_name
+  cluster_name               = var.cluster_name
   cluster_version = "1.30"
-
-  cluster_endpoint_public_access = true
+  cluster_endpoint_public_access  = true
   cluster_endpoint_private_access = true
 
   create_kms_key              = false
   create_cloudwatch_log_group = false
-  cluster_encryption_config   = {}
+  cluster_encryption_config = {
+    provider_key_arn = aws_kms_key.eks_secrets.arn
+    resources        = ["secrets"]
+  } 
+ 
+  create = true
 
   cluster_addons = {
     coredns = {
@@ -24,8 +28,8 @@ module "eks" {
     }
   }
 
-  vpc_id                   = var.vpc.vpc_id
-  subnet_ids               = var.private_subnets
+  vpc_id     = var.vpc.vpc_id
+  subnet_ids = var.private_subnets
 
   # EKS Managed Node Group(s)
   eks_managed_node_group_defaults = {
@@ -52,6 +56,7 @@ module "eks" {
     terraform = "true"
     type      = "end-end-gitops"
   }
+  depends_on = [ aws_kms_key.eks_secrets ]
 }
 
 # module "aws_auth" {
@@ -65,3 +70,9 @@ module "eks" {
 #     },
 #   ]
 # }
+
+resource "aws_kms_key" "eks_secrets" {
+  description             = "KMS key for EKS secrets encryption"
+  deletion_window_in_days = 10
+  enable_key_rotation     = true
+}
