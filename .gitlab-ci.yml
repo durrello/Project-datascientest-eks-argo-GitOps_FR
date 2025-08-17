@@ -12,39 +12,52 @@ variables:
   EKS_CLUSTER_NAME: "fall-project-cluster"
   KUBECTL_VERSION: "v1.28.0"
   # Cache optimization
-  APT_CACHE_DIR: "${CI_PROJECT_DIR}/apt-cache"
   TF_CACHE_DIR: "${CI_PROJECT_DIR}/.terraform"
 
-# Use optimized Docker image with pre-installed tools
-image: hashicorp/terraform:${TERRAFORM_VERSION}
+# Use Ubuntu image for better tool compatibility
+image: ubuntu:22.04
 
 # Global cache configuration
 cache:
   key: "${CI_COMMIT_REF_SLUG}"
   paths:
-    - ${APT_CACHE_DIR}/
     - ${TF_CACHE_DIR}/
     - .terraform.lock.hcl
+    - /usr/local/bin/terraform
+    - /usr/local/bin/aws
+    - /usr/local/bin/kubectl
 
 .install_tools: &install_tools
   - |
-    # Create cache directories
-    mkdir -p ${APT_CACHE_DIR}
-    # Install required packages using Alpine package manager (since we're using terraform image)
-    apk add --no-cache curl unzip wget python3 py3-pip git bash
+    # Update package list and install basic tools
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -q
+    apt-get install -y -q curl unzip wget python3 python3-pip git ca-certificates
+    
+    # Install Terraform (check if cached version exists)
+    if [ ! -f "/usr/local/bin/terraform" ] || [ "$(/usr/local/bin/terraform version -json 2>/dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["terraform_version"])' 2>/dev/null)" != "${TERRAFORM_VERSION}" ]; then
+      echo "Installing Terraform ${TERRAFORM_VERSION}..."
+      wget -q https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+      unzip -q terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+      mv terraform /usr/local/bin/
+      rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip
+    fi
+    terraform version
     
     # Install AWS CLI v2 (check if already installed)
-    if ! command -v aws &> /dev/null; then
-      curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    if [ ! -f "/usr/local/bin/aws" ]; then
+      echo "Installing AWS CLI v2..."
+      curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
       unzip -q awscliv2.zip
       ./aws/install
       rm -rf aws awscliv2.zip
     fi
     aws --version
     
-    # Install kubectl (check if already installed)
-    if ! command -v kubectl &> /dev/null; then
-      curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+    # Install kubectl (check if cached version exists)
+    if [ ! -f "/usr/local/bin/kubectl" ]; then
+      echo "Installing kubectl ${KUBECTL_VERSION}..."
+      curl -sLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
       chmod +x kubectl
       mv kubectl /usr/local/bin/
     fi
@@ -73,11 +86,14 @@ cache:
       }
     }
     EOF
+      # Also create the old format for compatibility
+      echo 'credentials "app.terraform.io" { token = "'$TF_API_TOKEN'" }' > /tmp/.terraformrc
     fi
 
 .terraform_init: &terraform_init
   - |
     cd ${TF_ROOT}
+    echo "Initializing Terraform in $(pwd)..."
     # Check if already initialized and up-to-date
     if [ ! -f .terraform.lock.hcl ] || [ ! -d .terraform ]; then
       terraform init -backend=true -upgrade
