@@ -30,10 +30,14 @@ terraform:validate:
 # -----------------
 terraform:security-scan:
   stage: security
-  image: aquasec/trivy:latest   # override image here
+  image: alpine:3.18
+  before_script:
+    - apk add --no-cache bash curl unzip git
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
   script:
     - cd $TF_ROOT
-    - trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found"
+    - ./trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found"
+
 
 # -----------------
 # 3. Terraform Plan
