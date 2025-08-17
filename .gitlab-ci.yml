@@ -1,17 +1,18 @@
-# .gitlab-ci.yml
 stages:
   - validate
   - plan
-  - deploy
+  - deploy-infra
+  - deploy-apps
 
 variables:
-  TERRAFORM_VERSION: "1.6.0"  # Updated to newer version
-  TF_ROOT: "Livrables/EKS-TF"  # Your terraform directory
+  TERRAFORM_VERSION: "1.6.6"
+  TF_ROOT: "Livrables/EKS-TF"
   TF_STATE_NAME: "default"
-  AWS_DEFAULT_REGION: "us-east-1"
   TF_CLI_CONFIG_FILE: "/tmp/.terraformrc"
+  # EKS cluster name - update this to match your cluster name
+  EKS_CLUSTER_NAME: "fall-project-cluster"
 
-# Use official terraform image
+# Use official terraform image with custom setup
 image:
   name: hashicorp/terraform:$TERRAFORM_VERSION
   entrypoint:
@@ -20,6 +21,27 @@ image:
 
 before_script:
   - cd $TF_ROOT
+  # Install AWS CLI v2
+  - apk add --no-cache python3 py3-pip curl unzip
+  - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  - unzip awscliv2.zip
+  - ./aws/install
+  - aws --version
+  # Install kubectl
+  - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  - chmod +x kubectl
+  - mv kubectl /usr/local/bin/
+  # Configure AWS credentials using GitLab CI variables
+  # Option 1: Using access keys
+  - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+  - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+  - aws configure set default.region $AWS_DEFAULT_REGION
+  
+  # Option 2: Using IAM role (uncomment if using OIDC/IAM roles)
+  # - export AWS_ROLE_ARN=$AWS_ROLE_ARN
+  # - export AWS_WEB_IDENTITY_TOKEN_FILE=$AWS_WEB_IDENTITY_TOKEN_FILE
+  # - export AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
+  # Verify terraform version
   - terraform --version
   # Setup Terraform Cloud credentials if using Terraform Cloud
   - |
@@ -44,6 +66,8 @@ terraform:validate:
 terraform:plan:
   stage: plan
   script:
+    # Try to update kubeconfig (may fail if cluster doesn't exist yet)
+    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME || echo "EKS cluster not found, continuing with plan..."
     - terraform plan -out="planfile"
   artifacts:
     paths:
@@ -52,10 +76,46 @@ terraform:plan:
   only:
     - branches
 
-# Apply terraform changes (only on main/master branch)
-terraform:apply:
-  stage: deploy
+# Apply infrastructure (EKS cluster and AWS resources)
+terraform:apply-infra:
+  stage: deploy-infra
   script:
+    # First apply only AWS infrastructure (EKS cluster, VPC, etc.)
+    - terraform apply -input=false -target=module.networking "planfile" || terraform apply -input=false -target=module.networking
+    - terraform apply -input=false -target=module.eks "planfile" || terraform apply -input=false -target=module.eks
+    # Wait for EKS cluster to be ready
+    - sleep 60
+    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+    - kubectl get nodes --timeout=300s || echo "Waiting for nodes to be ready..."
+  dependencies:
+    - terraform:plan
+  only:
+    - main
+    - master
+  when: manual
+
+# Apply applications (Kubernetes resources)
+terraform:apply-apps:
+  stage: deploy-apps
+  script:
+    # Update kubeconfig
+    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+    # Apply remaining Kubernetes resources
+    - terraform apply -input=false "planfile"
+  dependencies:
+    - terraform:apply-infra
+  only:
+    - main
+    - master
+  when: manual
+
+# Keep the original apply job for simpler deployments
+terraform:apply:
+  stage: deploy-infra
+  script:
+    # Update kubeconfig for EKS access (after cluster is created)
+    - sleep 30  # Give EKS cluster time to be ready
+    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME || echo "Waiting for EKS cluster to be ready..."
     - terraform apply -input=false "planfile"
   dependencies:
     - terraform:plan
@@ -66,8 +126,10 @@ terraform:apply:
 
 # Optional: Destroy infrastructure (manual trigger only)
 terraform:destroy:
-  stage: deploy
+  stage: deploy-apps
   script:
+    # Update kubeconfig for EKS access
+    - aws eks update-kubeconfig --region $TF_VAR_AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
     - terraform destroy -auto-approve
   only:
     - main
