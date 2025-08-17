@@ -5,15 +5,19 @@ stages:
   - apply
 
 variables:
-  TF_ROOT: "Livrables/EKS-TF"   # ✅ Update this path if your repo uses a different folder
-  GIT_SUBMODULE_STRATEGY: recursive   # ✅ Ensures Terraform modules & aws-auth are pulled
+  TF_ROOT: "Livrables/EKS-TF"
+  GIT_SUBMODULE_STRATEGY: recursive
+
+default:
+  image: hashicorp/terraform:1.6.6
+  before_script:
+    - echo "Running job in $CI_JOB_STAGE stage"
 
 # -----------------
 # 1. Terraform validate
 # -----------------
 terraform:validate:
   stage: validate
-  image: hashicorp/terraform:1.6.6
   script:
     - cd $TF_ROOT
     - terraform init -backend=false
@@ -24,18 +28,16 @@ terraform:validate:
 # -----------------
 terraform:security-scan:
   stage: security
-  image: aquasec/trivy:latest
+  image: aquasec/trivy:latest   # override image here
   script:
     - cd $TF_ROOT
-    # ✅ Correct Trivy usage (scans Terraform configs for misconfigs)
-    - trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found - review before proceeding"
+    - trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found"
 
 # -----------------
 # 3. Terraform Plan
 # -----------------
 terraform:plan:
   stage: plan
-  image: hashicorp/terraform:1.6.6
   script:
     - cd $TF_ROOT
     - terraform init
@@ -49,7 +51,6 @@ terraform:plan:
 # -----------------
 terraform:apply:
   stage: apply
-  image: hashicorp/terraform:1.6.6
   script:
     - cd $TF_ROOT
     - terraform apply -auto-approve tfplan
