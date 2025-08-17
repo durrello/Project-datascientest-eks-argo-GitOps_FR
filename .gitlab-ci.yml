@@ -38,7 +38,6 @@ terraform:security-scan:
     - cd $TF_ROOT
     - ./trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found"
 
-
 # -----------------
 # 3. Terraform Plan
 # -----------------
