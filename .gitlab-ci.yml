@@ -42,7 +42,7 @@ terraform:security-scan:
     - ./trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found"
 
 # -----------------
-# 3. Terraform Plan
+# 3. Terraform Plan (manual choice)
 # -----------------
 terraform:plan:
   stage: plan
@@ -53,6 +53,19 @@ terraform:plan:
   artifacts:
     paths:
       - $TF_ROOT/tfplan
+  when: manual
+
+# -----------------
+# 3b. Terraform Destroy (alternative to plan)
+# -----------------
+terraform:destroy-direct:
+  stage: plan
+  script:
+    - cd $TF_ROOT
+    - terraform init
+    - terraform destroy -auto-approve
+  when: manual
+  allow_failure: true
 
 # -----------------
 # 4. Terraform Apply (manual)
