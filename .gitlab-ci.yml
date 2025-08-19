@@ -67,7 +67,7 @@ terraform:apply:
     - terraform:plan
 
 # -----------------
-# 5. Terraform Destroy (manual)
+# 5. Terraform Destroy (manual, available after plan or apply)
 # -----------------
 terraform:destroy:
   stage: destroy
@@ -76,3 +76,6 @@ terraform:destroy:
     - terraform init
     - terraform destroy -auto-approve
   when: manual
+  dependencies:
+    - terraform:plan
+    - terraform:apply
