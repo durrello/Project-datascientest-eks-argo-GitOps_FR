@@ -18,9 +18,14 @@ default:
     - unzip awscliv2.zip
     - ./aws/install
     - aws --version
-    - aws --version
+    # Terraform
     - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
     - unzip terraform.zip -d /usr/local/bin/
+    # Export variables
+    - export AWS_ACCESS_KEY_ID="$TF_VAR_AWS_ACCESS_KEY_ID"
+    - export AWS_SECRET_ACCESS_KEY="$TF_VAR_AWS_SECRET_ACCESS_KEY"
+    - export AWS_DEFAULT_REGION="$TF_VAR_AWS_DEFAULT_REGION"
+
 
 # -----------------
 # 1. Terraform validate
