@@ -3,6 +3,7 @@ stages:
   - security
   - plan
   - apply
+  - destroy
 
 variables:
   TF_ROOT: "Livrables/EKS-TF"
@@ -40,7 +41,6 @@ terraform:security-scan:
     - cd $TF_ROOT
     - ./trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found"
 
-
 # -----------------
 # 3. Terraform Plan
 # -----------------
@@ -65,3 +65,14 @@ terraform:apply:
   when: manual
   dependencies:
     - terraform:plan
+
+# -----------------
+# 5. Terraform Destroy (manual)
+# -----------------
+terraform:destroy:
+  stage: destroy
+  script:
+    - cd $TF_ROOT
+    - terraform init
+    - terraform destroy -auto-approve
+  when: manual
