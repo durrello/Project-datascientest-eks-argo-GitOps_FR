@@ -7,25 +7,62 @@ stages:
 
 variables:
   TF_ROOT: "Livrables/EKS-TF"
+  TERRAFORM_VERSION: "1.6.6"
   GIT_SUBMODULE_STRATEGY: recursive
+  # Prevent Terraform from buffering output
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+# Global cache for better performance
+cache:
+  key: "${CI_COMMIT_REF_SLUG}"
+  paths:
+    - ${TF_ROOT}/.terraform/
+    - ${TF_ROOT}/.terraform.lock.hcl
 
 default:
   image: ubuntu:22.04
   before_script:
-    - apt-get update -y
-    - apt-get install -y bash curl unzip git jq python3 python3-pip
-    # Install AWS CLI v2
-    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-    - unzip awscliv2.zip
-    - ./aws/install
+    - export DEBIAN_FRONTEND=noninteractive
+    - apt-get update -q
+    - apt-get install -y -q bash curl unzip git jq python3 python3-pip ca-certificates
+    
+    # Install AWS CLI v2 (cached installation check)
+    - |
+      if [ ! -f "/usr/local/bin/aws" ]; then
+        echo "Installing AWS CLI v2..."
+        curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip -q awscliv2.zip
+        ./aws/install
+        rm -rf aws awscliv2.zip
+      fi
     - aws --version
-    # Terraform
-    - curl -fsSL https://releases.hashicorp.com/terraform/1.6.6/terraform_1.6.6_linux_amd64.zip -o terraform.zip
-    - unzip terraform.zip -d /usr/local/bin/
-    # Export variables
+    
+    # Install Terraform (cached installation check)
+    - |
+      if [ ! -f "/usr/local/bin/terraform" ] || [ "$(/usr/local/bin/terraform version -json 2>/dev/null | jq -r '.terraform_version' 2>/dev/null)" != "${TERRAFORM_VERSION}" ]; then
+        echo "Installing Terraform ${TERRAFORM_VERSION}..."
+        curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o terraform.zip
+        unzip -q terraform.zip -d /usr/local/bin/
+        rm terraform.zip
+      fi
+    - terraform version
+    
+    # Install kubectl for EKS operations
+    - |
+      if [ ! -f "/usr/local/bin/kubectl" ]; then
+        echo "Installing kubectl..."
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+      fi
+    - kubectl version --client
+    
+    # Configure AWS credentials
     - export AWS_ACCESS_KEY_ID="$TF_VAR_AWS_ACCESS_KEY_ID"
     - export AWS_SECRET_ACCESS_KEY="$TF_VAR_AWS_SECRET_ACCESS_KEY"
     - export AWS_DEFAULT_REGION="$TF_VAR_AWS_DEFAULT_REGION"
+    - aws sts get-caller-identity || { echo "AWS credentials validation failed"; exit 1; }
 
 # -----------------
 # 1. Terraform validate
@@ -34,8 +71,14 @@ terraform:validate:
   stage: validate
   script:
     - cd $TF_ROOT
-    - terraform init -backend=false
+    - echo "Validating Terraform configuration..."
+    - terraform init -backend=false -upgrade
+    - terraform fmt -check=true -diff=true || echo "⚠️ Code formatting issues found"
     - terraform validate
+    - echo "✅ Terraform validation completed"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
 
 # -----------------
 # 2. Security Scan with Trivy
@@ -44,75 +87,166 @@ terraform:security-scan:
   stage: security
   image: ubuntu:22.04
   before_script:
-    - apt-get update -y
-    - apt-get install -y bash curl unzip git wget
-    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+    - export DEBIAN_FRONTEND=noninteractive
+    - apt-get update -q
+    - apt-get install -y -q bash curl unzip git wget ca-certificates
+    - |
+      echo "Installing Trivy..."
+      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
   script:
     - cd $TF_ROOT
-    - ./trivy config . --exit-code 1 --severity HIGH,CRITICAL || echo "⚠️ Security issues found"
+    - echo "Running security scan..."
+    - trivy config . --exit-code 1 --severity HIGH,CRITICAL --format table || echo "⚠️ Security issues found - review before proceeding"
+    - echo "✅ Security scan completed"
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
 
 # -----------------
-# 3. Terraform Plan (manual choice)
+# 3. Terraform Plan
 # -----------------
 terraform:plan:
   stage: plan
   script:
     - cd $TF_ROOT
-    - terraform init
-    - terraform plan -out=tfplan
+    - echo "Initializing Terraform with backend..."
+    - terraform init -upgrade
+    
+    # Validate the configuration after init
+    - terraform validate
+    
+    - echo "Creating Terraform execution plan..."
+    - terraform plan -detailed-exitcode -out=tfplan -lock-timeout=300s
+    
+    - echo "Generating human-readable plan..."
+    - terraform show -no-color tfplan > plan.txt
+    
+    - echo "✅ Terraform plan completed successfully"
+    - echo "Plan summary:"
+    - grep -E "^Plan:|^No changes" plan.txt || echo "Plan details available in artifacts"
   artifacts:
     paths:
-      - $TF_ROOT/tfplan
-  when: manual
+      - ${TF_ROOT}/tfplan
+      - ${TF_ROOT}/plan.txt
+      - ${TF_ROOT}/.terraform.lock.hcl
+    reports:
+      terraform: ${TF_ROOT}/tfplan
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
 
 # -----------------
-# 3b. Terraform Destroy (alternative to plan)
-# -----------------
-terraform:destroy-direct:
-  stage: plan
-  script:
-    - cd $TF_ROOT
-    - terraform init
-    - terraform destroy -auto-approve
-  when: manual
-  allow_failure: true
-
-# -----------------
-# 4. Terraform Apply (manual)
+# 4. Terraform Apply
 # -----------------
 terraform:apply:
   stage: apply
+  environment:
+    name: production
+    action: start
   script:
     - cd $TF_ROOT
-    - terraform apply -auto-approve tfplan
-  when: manual
-  dependencies:
-    - terraform:plan
-
-# -----------------
-# 5. Terraform Destroy after Plan (manual)
-# -----------------
-terraform:destroy-after-plan:
-  stage: apply
-  script:
-    - cd $TF_ROOT
+    - echo "Verifying plan file exists..."
+    - ls -la tfplan || { echo "❌ Plan file not found"; exit 1; }
+    
+    - echo "Re-initializing Terraform to ensure consistency..."
     - terraform init
-    - terraform destroy -auto-approve
-  when: manual
+    
+    - echo "Applying Terraform plan..."
+    - terraform apply -auto-approve -lock-timeout=300s tfplan
+    
+    # Post-apply verification for EKS
+    - |
+      if terraform output cluster_name 2>/dev/null; then
+        echo "EKS cluster detected, updating kubeconfig..."
+        CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "fall-project-cluster")
+        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME || echo "⚠️ Failed to update kubeconfig"
+        kubectl get nodes || echo "⚠️ Unable to connect to cluster"
+      fi
+    
+    - echo "✅ Terraform apply completed successfully"
+    - terraform output
   dependencies:
     - terraform:plan
-  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - stuck_or_timeout_failure
 
 # -----------------
-# 6. Terraform Destroy after Apply (manual)
+# 5. Terraform Destroy (Standalone)
+# -----------------
+terraform:destroy-direct:
+  stage: plan
+  environment:
+    name: production
+    action: stop
+  script:
+    - cd $TF_ROOT
+    - echo "Initializing Terraform for destroy operation..."
+    - terraform init
+    
+    # Safety check
+    - |
+      if [ "$DESTROY_CONFIRMED" != "yes" ]; then
+        echo "❌ Destruction not confirmed. Set CI/CD variable DESTROY_CONFIRMED=yes to proceed."
+        exit 1
+      fi
+    
+    - echo "Creating destroy plan..."
+    - terraform plan -destroy -out=destroy-plan
+    
+    - echo "Applying destroy plan..."
+    - terraform apply -auto-approve destroy-plan
+    
+    - echo "✅ Infrastructure destroyed successfully"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+  allow_failure: false
+
+# -----------------
+# 6. Terraform Destroy (After Apply)
 # -----------------
 terraform:destroy-after-apply:
   stage: destroy
+  environment:
+    name: production
+    action: stop
   script:
     - cd $TF_ROOT
+    - echo "Initializing Terraform for destroy operation..."
     - terraform init
-    - terraform destroy -auto-approve
-  when: manual
+    
+    # Safety check
+    - |
+      if [ "$DESTROY_CONFIRMED" != "yes" ]; then
+        echo "❌ Destruction not confirmed. Set CI/CD variable DESTROY_CONFIRMED=yes to proceed."
+        exit 1
+      fi
+    
+    # Clean up EKS resources first if they exist
+    - |
+      if terraform output cluster_name 2>/dev/null; then
+        echo "Cleaning up EKS resources..."
+        CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "fall-project-cluster")
+        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME || echo "⚠️ Cluster may not exist"
+        kubectl delete all --all --all-namespaces --timeout=300s || echo "⚠️ Failed to clean up Kubernetes resources"
+      fi
+    
+    - echo "Destroying infrastructure..."
+    - terraform destroy -auto-approve -lock-timeout=300s
+    
+    - echo "✅ Infrastructure destroyed successfully"
   dependencies:
     - terraform:apply
-  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+  allow_failure: false
