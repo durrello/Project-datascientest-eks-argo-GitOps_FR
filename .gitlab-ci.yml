@@ -67,10 +67,10 @@ terraform:apply:
     - terraform:plan
 
 # -----------------
-# 5. Terraform Destroy (manual, available after plan or apply)
+# 5. Terraform Destroy after Plan (manual)
 # -----------------
-terraform:destroy:
-  stage: destroy
+terraform:destroy-after-plan:
+  stage: apply
   script:
     - cd $TF_ROOT
     - terraform init
@@ -78,4 +78,18 @@ terraform:destroy:
   when: manual
   dependencies:
     - terraform:plan
+  allow_failure: true
+
+# -----------------
+# 6. Terraform Destroy after Apply (manual)
+# -----------------
+terraform:destroy-after-apply:
+  stage: destroy
+  script:
+    - cd $TF_ROOT
+    - terraform init
+    - terraform destroy -auto-approve
+  when: manual
+  dependencies:
     - terraform:apply
+  allow_failure: true
