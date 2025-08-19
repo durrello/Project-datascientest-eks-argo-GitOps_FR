@@ -10,9 +10,10 @@ variables:
   GIT_SUBMODULE_STRATEGY: recursive
 
 default:
-  image: alpine:3.18
+  image: ubuntu:22.04
   before_script:
-    - apk add --no-cache bash curl unzip git jq python3 py3-pip libc6-compat
+    - apt-get update -y
+    - apt-get install -y bash curl unzip git jq python3 python3-pip
     # Install AWS CLI v2
     - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
     - unzip awscliv2.zip
@@ -25,7 +26,6 @@ default:
     - export AWS_ACCESS_KEY_ID="$TF_VAR_AWS_ACCESS_KEY_ID"
     - export AWS_SECRET_ACCESS_KEY="$TF_VAR_AWS_SECRET_ACCESS_KEY"
     - export AWS_DEFAULT_REGION="$TF_VAR_AWS_DEFAULT_REGION"
-
 
 # -----------------
 # 1. Terraform validate
@@ -42,9 +42,10 @@ terraform:validate:
 # -----------------
 terraform:security-scan:
   stage: security
-  image: alpine:3.18
+  image: ubuntu:22.04
   before_script:
-    - apk add --no-cache bash curl unzip git
+    - apt-get update -y
+    - apt-get install -y bash curl unzip git wget
     - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
   script:
     - cd $TF_ROOT
