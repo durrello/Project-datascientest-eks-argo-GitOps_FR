@@ -12,6 +12,9 @@ variables:
   # Prevent Terraform from buffering output
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
+  # Add timeout configurations
+  TF_VAR_helm_timeout: "600"
+  HELM_TIMEOUT: "600s"
 
 # Global cache for better performance
 cache:
@@ -57,6 +60,14 @@ default:
         mv kubectl /usr/local/bin/
       fi
     - kubectl version --client
+    
+    # Install Helm
+    - |
+      if [ ! -f "/usr/local/bin/helm" ]; then
+        echo "Installing Helm..."
+        curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      fi
+    - helm version
     
     # Configure AWS credentials
     - export AWS_ACCESS_KEY_ID="$TF_VAR_AWS_ACCESS_KEY_ID"
@@ -116,8 +127,13 @@ terraform:plan:
     # Validate the configuration after init
     - terraform validate
     
+    # Check for state lock and force unlock if necessary
+    - |
+      echo "Checking for state locks..."
+      terraform force-unlock -force $(terraform show -json 2>/dev/null | jq -r '.values.root_module.resources[] | select(.type == "terraform_remote_state") | .values.lock_id' 2>/dev/null) || echo "No locks to clear"
+    
     - echo "Creating Terraform execution plan..."
-    - terraform plan -out=tfplan -lock-timeout=300s
+    - terraform plan -out=tfplan -lock-timeout=600s -var="helm_timeout=600"
     
     - echo "Generating human-readable plan..."
     - terraform show -no-color tfplan > plan.txt || echo "Plan output generation failed but continuing..."
@@ -140,13 +156,14 @@ terraform:plan:
       when: manual
 
 # -----------------
-# 4. Terraform Apply
+# 4. Terraform Apply with Enhanced Error Handling
 # -----------------
 terraform:apply:
   stage: apply
   environment:
     name: production
     action: start
+  timeout: 45m  # Extended timeout for Helm installations
   script:
     - cd $TF_ROOT
     - echo "Verifying plan file exists..."
@@ -155,8 +172,40 @@ terraform:apply:
     - echo "Re-initializing Terraform to ensure consistency..."
     - terraform init
     
-    - echo "Applying Terraform plan..."
-    - terraform apply -auto-approve -lock-timeout=300s tfplan
+    # Check if plan is still valid by refreshing state first
+    - echo "Refreshing Terraform state to check for drift..."
+    - terraform plan -detailed-exitcode -out=tfplan-refresh -lock-timeout=600s -var="helm_timeout=600" || PLAN_EXIT_CODE=$?
+    
+    - |
+      if [ "${PLAN_EXIT_CODE:-0}" -eq 2 ]; then
+        echo "⚠️ State has drifted, using fresh plan..."
+        mv tfplan-refresh tfplan
+      elif [ "${PLAN_EXIT_CODE:-0}" -eq 1 ]; then
+        echo "❌ Plan validation failed"
+        exit 1
+      else
+        echo "✅ Original plan is still valid"
+      fi
+    
+    # Configure Helm timeout
+    - export HELM_TIMEOUT=600s
+    
+    - echo "Applying Terraform plan with extended timeouts..."
+    - terraform apply -auto-approve -lock-timeout=600s tfplan
+    
+    # Verify EKS cluster is ready
+    - |
+      if terraform output cluster_name 2>/dev/null; then
+        CLUSTER_NAME=$(terraform output -raw cluster_name)
+        echo "Configuring kubectl for cluster: $CLUSTER_NAME"
+        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME
+        
+        echo "Waiting for cluster to be ready..."
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s || echo "⚠️ Some nodes may not be ready yet"
+        
+        echo "Cluster status:"
+        kubectl get nodes
+      fi
     
     - echo "✅ Terraform apply completed successfully"
     - echo "Final outputs:"
@@ -175,7 +224,64 @@ terraform:apply:
       - stuck_or_timeout_failure
 
 # -----------------
-# 5. Terraform Destroy (Standalone)
+# 5. Helm Install Retry Job (For Failed Helm Releases)
+# -----------------
+helm:retry-install:
+  stage: apply
+  script:
+    - cd $TF_ROOT
+    - terraform init
+    
+    # Configure kubectl
+    - |
+      if terraform output cluster_name 2>/dev/null; then
+        CLUSTER_NAME=$(terraform output -raw cluster_name)
+        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME
+      fi
+    
+    # Retry failed Helm releases with increased timeout
+    - |
+      echo "Checking for failed Helm releases..."
+      
+      # Check ArgoCD
+      if helm list -n argocd | grep -q "FAILED"; then
+        echo "Retrying ArgoCD installation..."
+        helm uninstall argocd -n argocd --timeout=300s || true
+        kubectl delete namespace argocd --timeout=300s || true
+        sleep 30
+        terraform apply -target=module.argocd.helm_release.argocd -auto-approve -var="helm_timeout=600"
+      fi
+      
+      # Check Cert Manager
+      if helm list -n cert-manager | grep -q "FAILED"; then
+        echo "Retrying Cert Manager installation..."
+        helm uninstall cert-manager -n cert-manager --timeout=300s || true
+        kubectl delete namespace cert-manager --timeout=300s || true
+        sleep 30
+        terraform apply -target=module.cert_manager -auto-approve -var="helm_timeout=600"
+      fi
+      
+      # Check Velero
+      if helm list -n velero | grep -q "FAILED"; then
+        echo "Retrying Velero installation..."
+        helm uninstall velero -n velero --timeout=300s || true
+        kubectl delete namespace velero --timeout=300s || true
+        sleep 30
+        terraform apply -target=module.velero -auto-approve -var="helm_timeout=600"
+      fi
+      
+    - echo "✅ Helm retry operations completed"
+  dependencies:
+    - terraform:apply
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+    - if: '$CI_COMMIT_BRANCH == "master"'
+      when: manual
+  allow_failure: true
+
+# -----------------
+# 6. Terraform Destroy (Standalone)
 # -----------------
 terraform:destroy-direct:
   stage: plan
@@ -209,7 +315,7 @@ terraform:destroy-direct:
   allow_failure: false
 
 # -----------------
-# 6. Terraform Destroy (After Apply)
+# 7. Terraform Destroy (After Apply)
 # -----------------
 terraform:destroy-after-apply:
   stage: destroy
@@ -234,11 +340,23 @@ terraform:destroy-after-apply:
         echo "Cleaning up EKS resources..."
         CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "fall-project-cluster")
         aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME || echo "⚠️ Cluster may not exist"
+        
+        # Remove finalizers from stuck resources
+        kubectl patch crd/certificates.cert-manager.io -p '{"metadata":{"finalizers":[]}}' --type=merge || true
+        kubectl patch crd/orders.acme.cert-manager.io -p '{"metadata":{"finalizers":[]}}' --type=merge || true
+        
+        # Clean up Helm releases
+        helm list --all-namespaces | grep -v NAME | awk '{print $1" -n "$2}' | xargs -I {} helm uninstall {} --timeout=300s || true
+        
+        # Delete all resources
         kubectl delete all --all --all-namespaces --timeout=300s || echo "⚠️ Failed to clean up Kubernetes resources"
+        
+        # Delete persistent volumes
+        kubectl delete pv --all --timeout=300s || true
       fi
     
     - echo "Destroying infrastructure..."
-    - terraform destroy -auto-approve -lock-timeout=300s
+    - terraform destroy -auto-approve -lock-timeout=600s
     
     - echo "✅ Infrastructure destroyed successfully"
   dependencies:
