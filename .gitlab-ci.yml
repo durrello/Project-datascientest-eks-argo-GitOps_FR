@@ -117,12 +117,34 @@ terraform:plan:
     - terraform validate
     
     - echo "Creating Terraform execution plan..."
-    - terraform plan -detailed-exitcode -out=tfplan -lock-timeout=300s
+    # Handle terraform plan exit codes properly:
+    # 0 = no changes, 1 = error, 2 = changes present
+    - |
+      set +e  # Don't exit on non-zero return codes
+      terraform plan -detailed-exitcode -out=tfplan -lock-timeout=300s
+      PLAN_EXIT_CODE=$?
+      set -e  # Re-enable exit on error
+      
+      case $PLAN_EXIT_CODE in
+        0)
+          echo "✅ No changes detected in Terraform plan"
+          ;;
+        1)
+          echo "❌ Terraform plan failed with errors"
+          exit 1
+          ;;
+        2)
+          echo "✅ Terraform plan completed - changes detected"
+          ;;
+        *)
+          echo "❌ Unexpected exit code from terraform plan: $PLAN_EXIT_CODE"
+          exit 1
+          ;;
+      esac
     
     - echo "Generating human-readable plan..."
     - terraform show -no-color tfplan > plan.txt
     
-    - echo "✅ Terraform plan completed successfully"
     - echo "Plan summary:"
     - grep -E "^Plan:|^No changes" plan.txt || echo "Plan details available in artifacts"
   artifacts:
@@ -154,19 +176,46 @@ terraform:apply:
     - echo "Re-initializing Terraform to ensure consistency..."
     - terraform init
     
+    - echo "Validating plan file compatibility..."
+    - terraform show tfplan > /dev/null || { echo "❌ Plan file is incompatible or corrupted"; exit 1; }
+    
     - echo "Applying Terraform plan..."
     - terraform apply -auto-approve -lock-timeout=300s tfplan
     
     # Post-apply verification for EKS
     - |
+      echo "Checking for EKS cluster outputs..."
       if terraform output cluster_name 2>/dev/null; then
         echo "EKS cluster detected, updating kubeconfig..."
         CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo "fall-project-cluster")
-        aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME || echo "⚠️ Failed to update kubeconfig"
-        kubectl get nodes || echo "⚠️ Unable to connect to cluster"
+        
+        # Wait for EKS cluster to be ready
+        echo "Waiting for EKS cluster to be ready..."
+        max_attempts=10
+        attempt=1
+        while [ $attempt -le $max_attempts ]; do
+          echo "Attempt $attempt/$max_attempts to update kubeconfig..."
+          if aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $CLUSTER_NAME; then
+            echo "Successfully updated kubeconfig"
+            break
+          fi
+          echo "Failed to update kubeconfig, waiting 30 seconds before retry..."
+          sleep 30
+          attempt=$((attempt + 1))
+        done
+        
+        if [ $attempt -le $max_attempts ]; then
+          echo "Verifying cluster connectivity..."
+          kubectl get nodes || echo "⚠️ Unable to list nodes - cluster may still be initializing"
+        else
+          echo "⚠️ Failed to update kubeconfig after $max_attempts attempts"
+        fi
+      else
+        echo "No EKS cluster outputs found - skipping kubeconfig setup"
       fi
     
     - echo "✅ Terraform apply completed successfully"
+    - echo "Final outputs:"
     - terraform output
   dependencies:
     - terraform:plan
