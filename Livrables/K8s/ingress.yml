@@ -13,21 +13,10 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-path: /
 spec:
   rules:
-  - host: "domain.com"
-    http:
+  - http:  # No host specified - will work with ALB hostname
       paths:
       - pathType: Prefix
-        path: "/test"
-        backend:
-          service:
-            name: reddit-clone-service
-            port:
-              number: 80
-  - host: "*.domain.com"
-    http:
-      paths:
-      - pathType: Prefix
-        path: "/test"
+        path: "/"  # Changed from /test to / for root access
         backend:
           service:
             name: reddit-clone-service
