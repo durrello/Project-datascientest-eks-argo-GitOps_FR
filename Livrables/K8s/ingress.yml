@@ -1,11 +1,8 @@
----
-# k8s/ingress.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: ingress-reddit-app
   annotations:
-    # AWS Load Balancer Controller annotations
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
@@ -13,12 +10,12 @@ metadata:
     alb.ingress.kubernetes.io/healthcheck-path: /
 spec:
   rules:
-  - http:  # No host specified - will work with ALB hostname
-      paths:
-      - pathType: Prefix
-        path: "/"  # Changed from /test to / for root access
-        backend:
-          service:
-            name: reddit-clone-service
-            port:
-              number: 80
+    - http:
+        paths:
+          - pathType: Prefix
+            path: "/"
+            backend:
+              service:
+                name: reddit-clone-service
+                port:
+                  number: 80

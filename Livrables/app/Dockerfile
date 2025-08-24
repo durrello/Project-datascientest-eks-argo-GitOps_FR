@@ -2,8 +2,10 @@ FROM node:19-alpine3.15
 
 WORKDIR /reddit-clone
 
-COPY . /reddit-clone
-RUN npm install 
+COPY package*.json ./
+RUN npm install --production
+
+COPY . .
 
 EXPOSE 3000
-CMD ["npm","run","dev"]
+CMD ["npm", "run", "start"] # or "dev" if for dev environment

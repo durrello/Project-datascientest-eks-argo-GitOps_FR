@@ -70,19 +70,14 @@ kubectl get secret --namespace monitoring prometheus-grafana -o jsonpath="{.data
 # Port forward Prometheus (optional)
 kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
 ```
-
-## Step 5: Code Quality with SonarQube
-
-Your SonarQube instance is running at the IP address shown in Terraform outputs:
-
+To view the website deployed via argocd
+# Wait for LoadBalancer (2-5 minutes)
 ```bash
-# Get SonarQube URL from Terraform outputs
-terraform output sonarqube_url
-
-# Default credentials:
-# Username: admin
-# Password: admin (change on first login)
+kubectl get svc reddit-clone-service -w
 ```
+# Once EXTERNAL-IP appears (not <pending>), use that URL
+# Example: http://a1234567-123456789.us-east-1.elb.amazonaws.com
+
 
 ## Integration Workflow
 

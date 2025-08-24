@@ -1,6 +1,3 @@
-
----
-# k8s/service.yaml
 apiVersion: v1
 kind: Service
 metadata:
@@ -11,7 +8,7 @@ spec:
   selector:
     app: reddit-clone
   ports:
-  - port: 80
-    targetPort: 3000
-    protocol: TCP
+    - port: 80
+      targetPort: 3000
+      protocol: TCP
   type: LoadBalancer
