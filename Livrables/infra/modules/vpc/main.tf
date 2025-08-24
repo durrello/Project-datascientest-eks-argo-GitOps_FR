@@ -26,8 +26,8 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true
 
   tags = merge(var.tags, {
-    Name = "${var.vpc_name}-public-${count.index + 1}"
-    Type = "Public"
+    Name                     = "${var.vpc_name}-public-${count.index + 1}"
+    Type                     = "Public"
     "kubernetes.io/role/elb" = "1"
   })
 }
@@ -40,8 +40,8 @@ resource "aws_subnet" "private" {
   availability_zone = var.availability_zones[count.index]
 
   tags = merge(var.tags, {
-    Name = "${var.vpc_name}-private-${count.index + 1}"
-    Type = "Private"
+    Name                              = "${var.vpc_name}-private-${count.index + 1}"
+    Type                              = "Private"
     "kubernetes.io/role/internal-elb" = "1"
   })
 }
@@ -111,4 +111,33 @@ resource "aws_route_table_association" "private" {
 
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private[count.index].id
+}
+
+resource "aws_security_group" "sonarqube_security_group" {
+  name        = "sonarqube-sg"
+  description = "Allow TLS inbound traffic"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "TLS from VPC"
+    from_port   = "9000"
+    to_port     = "9000"
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }

@@ -28,3 +28,7 @@ output "nat_gateway_ids" {
   description = "IDs of the NAT Gateways"
   value       = aws_nat_gateway.main[*].id
 }
+
+output "sonarqube_sg_id" {
+  value = aws_security_group.sonarqube_security_group.id
+}

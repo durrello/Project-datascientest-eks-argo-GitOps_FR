@@ -62,10 +62,10 @@ resource "helm_release" "prometheus" {
   version    = "76.5.1"
   namespace  = kubernetes_namespace.monitoring.metadata[0].name
 
-  timeout = 600  # 10 minutes timeout
+  timeout = 600 # 10 minutes timeout
 
   atomic = false
-  
+
   values = [
     yamlencode({
       prometheus = {
@@ -77,21 +77,21 @@ resource "helm_release" "prometheus" {
           resources = {
             requests = {
               memory = "512Mi"
-              cpu = "200m"
+              cpu    = "200m"
             }
             limits = {
               memory = "2Gi"
-              cpu = "1000m"
+              cpu    = "1000m"
             }
           }
           storageSpec = {
             volumeClaimTemplate = {
               spec = {
-                storageClassName = "gp2"  # Ensure this matches your cluster's storage class
+                storageClassName = "gp2" # Ensure this matches your cluster's storage class
                 accessModes      = ["ReadWriteOnce"]
                 resources = {
                   requests = {
-                    storage = "20Gi"  # Reduced size for faster provisioning
+                    storage = "20Gi" # Reduced size for faster provisioning
                   }
                 }
               }
@@ -105,19 +105,19 @@ resource "helm_release" "prometheus" {
           type = "ClusterIP"
         }
         persistence = {
-          enabled = true
-          storageClassName = "gp2"  # Ensure this matches your cluster's storage class
-          size = "5Gi"  # Reduced size
+          enabled          = true
+          storageClassName = "gp2" # Ensure this matches your cluster's storage class
+          size             = "5Gi" # Reduced size
         }
         adminPassword = "admin123"
         resources = {
           requests = {
             memory = "128Mi"
-            cpu = "100m"
+            cpu    = "100m"
           }
           limits = {
             memory = "256Mi"
-            cpu = "200m"
+            cpu    = "200m"
           }
         }
       }
@@ -130,11 +130,11 @@ resource "helm_release" "prometheus" {
           resources = {
             requests = {
               memory = "64Mi"
-              cpu = "10m"
+              cpu    = "10m"
             }
             limits = {
               memory = "128Mi"
-              cpu = "100m"
+              cpu    = "100m"
             }
           }
         }

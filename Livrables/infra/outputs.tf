@@ -47,17 +47,12 @@ output "kubectl_config" {
 
 output "sonarqube_public_ip" {
   description = "Public IP address of SonarQube instance"
-  value       = module.sonarqube.public_ip
-}
-
-output "sonarqube_private_ip" {
-  description = "Private IP address of SonarQube instance"
-  value       = module.sonarqube.private_ip
+  value       = module.sonarqube.ubuntu_server_ip
 }
 
 output "sonarqube_url" {
   description = "SonarQube URL"
-  value       = "http://${module.sonarqube.public_ip}:9000"
+  value       = module.sonarqube.sonarqube_ui
 }
 
 output "argocd_url" {

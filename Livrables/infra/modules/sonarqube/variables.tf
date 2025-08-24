@@ -1,33 +1,26 @@
-# modules/sonarqube/variables.tf
-variable "vpc_id" {
-  description = "VPC ID where SonarQube will be deployed"
-  type        = string
-}
-
-variable "subnet_id" {
-  description = "Subnet ID for SonarQube instance"
-  type        = string
+variable "ami" {
+  description = "ami"
+  default     = "ami-0bbdd8c17ed981ef9"
 }
 
 variable "instance_type" {
-  description = "EC2 instance type for SonarQube"
-  type        = string
+  description = "instance_type"
   default     = "t3.medium"
 }
 
-variable "key_pair_name" {
-  description = "Name of the EC2 Key Pair"
-  type        = string
+variable "port" {
+  description = "port"
+  default     = 9000
 }
 
-variable "allowed_cidr_blocks" {
-  description = "CIDR blocks allowed to access SonarQube"
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
+variable "vpc_id" {
+  description = "vpc_id"
 }
 
-variable "tags" {
-  description = "Tags to apply to resources"
-  type        = map(string)
-  default     = {}
+variable "security_group_id" {
+  type = string
+}
+
+variable "subnet_id" {
+
 }

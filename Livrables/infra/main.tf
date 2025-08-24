@@ -107,13 +107,9 @@ module "helm_charts" {
 module "sonarqube" {
   source = "./modules/sonarqube"
 
-  vpc_id              = module.vpc.vpc_id
-  subnet_id           = module.vpc.public_subnet_ids[0]
-  instance_type       = var.sonarqube_instance_type
-  key_pair_name       = var.key_pair_name
-  allowed_cidr_blocks = var.sonarqube_allowed_cidrs
-
-  tags = var.common_tags
-
-  depends_on = [module.vpc]
-}
+  vpc_id            = module.vpc.vpc_id
+  subnet_id         = module.vpc.public_subnet_ids[0]
+  instance_type     = var.sonarqube_instance_type
+  security_group_id = module.vpc.sonarqube_sg_id
+  depends_on        = [module.vpc]
+}   
