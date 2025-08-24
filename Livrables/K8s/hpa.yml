@@ -2,6 +2,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: reddit-clone-hpa
+  namespace: end-to-end-gitops
 spec:
   scaleTargetRef:
     apiVersion: apps/v1

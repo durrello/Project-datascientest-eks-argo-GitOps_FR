@@ -2,6 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: reddit-clone-service
+  namespace: end-to-end-gitops
   labels:
     app: reddit-clone
 spec:

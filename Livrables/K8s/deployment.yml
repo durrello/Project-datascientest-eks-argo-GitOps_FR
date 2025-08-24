@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: reddit-clone-deployment
+  namespace: end-to-end-gitops
   labels:
     app: reddit-clone
 spec:
