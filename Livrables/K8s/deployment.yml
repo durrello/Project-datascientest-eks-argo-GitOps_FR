@@ -26,6 +26,19 @@ spec:
               value: "production"
             - name: PORT
               value: "3000"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
           resources:
             requests:
               memory: "256Mi"
