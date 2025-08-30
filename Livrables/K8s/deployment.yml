@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: reddit-clone
-          image: durrellgemuh/reddit-clone-app:30082025
+          image: durrellgemuh/reddit-clone-app:30082025.0
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
