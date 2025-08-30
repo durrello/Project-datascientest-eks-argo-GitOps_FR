@@ -1,34 +1,95 @@
-# Reddit Clone App on Kubernetes with Ingress FALL LEWIS
-This project demonstrates how to deploy a Reddit clone app on Kubernetes with Ingress and expose it to the world using Minikube as the cluster.
+# reddit-clone-app Docker Image and AWS ECR image
+
+This repository contains the Dockerfile and instructions to build and push the Docker image for the Reddit Clone App to both Amazon Elastic Container Registry (ECR) and Docker Hub.
 
 ## Prerequisites
-Before you begin, you should have the following tools installed on your local machine: 
 
-- Docker
-- Kubeatm master and worker node
-- kubectl
-- Git
+- Docker installed on your local machine
+- AWS CLI installed and configured with permission to access ECR
+- AWS account with an ECR repository created or permissions to create one
+- Docker Hub account for pushing images
+- Docker Hub login credentials
 
-You can install Prerequisites by doing this steps. [click here & complete all steps one by one]().
+## Build the Docker Image
+
+Clone the repository containing the app source:
+
+```
+git clone hhttps://gitlab.com/durrell.gemuh.a-group/end-to-end-gitops.git
+cd Livrables/app
+```
+
+Build the Docker image locally using the Dockerfile:
+
+```
+docker build -t reddit-clone-app:latest .
+```
+
+## Tag the Docker Image
+
+Tag the image with your Docker Hub username and repository name:
+
+```
+docker tag reddit-clone-app:latest <dockerhub-username>/reddit-clone-app:latest
+```
+
+Replace `<dockerhub-username>` with your Docker Hub username.
+
+## Log in to Docker Hub
+
+Authenticate Docker CLI with Docker Hub:
+
+```
+docker login
+```
+
+Enter your Docker Hub username and password when prompted.
+
+## Push the Image to Docker Hub
+
+Push the tagged image to your Docker Hub repository:
+
+```
+docker push <dockerhub-username>/reddit-clone-app:latest
+```
+
+## Pull and Run the Image
+
+To run the image from Docker Hub on any machine:
+
+```
+docker pull <dockerhub-username>/reddit-clone-app:latest
+docker run -d -p 3000:3000 <dockerhub-username>/reddit-clone-app:latest
+```
+
+This exposes the application on port 3000.
+
+---
+
+For more detailed information on Docker usage, visit the [Docker official documentation](https://docs.docker.com/).
 
 
-## Installation
-Follow these steps to install and run the Reddit clone app on your local machine:
 
-1) Clone this repository to your local machine: `git clone https://github.com/fallewi/reddit-apps.git`
-2) Navigate to the project directory: `cd reddit-clone-k8s-ingress`
-3) Build the Docker image for the Reddit clone app: `docker build -t reddit-clone-app .`
-4) Deploy the app to Kubernetes: `kubectl apply -f deployment.yaml`
-1) Deploy the Service for deployment to Kubernetes: `kubectl apply -f service.yaml`
-5) Enable Ingress by using Command: `minikube addons enable ingress`
-6) Expose the app as a Kubernetes service: `kubectl expose deployment reddit-deployment --type=NodePort --port=5000`
-7) Create an Ingress resource: `kubectl apply -f ingress.yaml`
+## Push to Amazon ECR
+1. Authenticate Docker to your AWS ECR registry:
 
+# Create ECR repository (if not exists)
+aws ecr create-repository --repository-name reddit-clone-app --region us-east-1
 
-## Test Ingress DNS for the app:
+# Get login token and login to ECR
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
 
+2. Tag the Docker image for ECR:
 
-## Contributing
-If you'd like to contribute to this project, please open an issue or submit a pull request.
+docker tag reddit-clone-app:latest <aws-account-id>.dkr.ecr.<aws-region>.amazonaws.com/reddit-clone-app:latest
 
+3. Push the image to the ECR repository:
 
+docker push <aws-account-id>.dkr.ecr.<aws-region>.amazonaws.com/reddit-clone-app:latest
+
+Replace `<aws-region>` and `<aws-account-id>` with your AWS region and account ID.
+
+## References
+
+- [Amazon ECR Documentation](https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html)
+- [AWS CLI ECR Login](https://docs.aws.amazon.com/cli/latest/reference/ecr/get-login-password.html)

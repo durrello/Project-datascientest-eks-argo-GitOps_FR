@@ -92,15 +92,7 @@ module "helm_charts" {
     helm       = helm
     kubernetes = kubernetes
   }
-
-  GITLAB_USERNAME              = var.GITLAB_USERNAME
-  GITLAB_PERSONAL_ACCESS_TOKEN = var.GITLAB_PERSONAL_ACCESS_TOKEN
-  GITLAB_REPO_URL              = var.GITLAB_REPO_URL
-  GITLAB_REPO_BRANCH           = var.GITLAB_REPO_BRANCH
-  GITLAB_REPO_PATH             = var.GITLAB_REPO_PATH
-  APP_NAMESPACE                = var.APP_NAMESPACE
-
-  depends_on = [module.eks]
+  depends_on = [module.eks] 
 }
 
 # SonarQube EC2 Module

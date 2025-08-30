@@ -87,11 +87,11 @@ resource "helm_release" "prometheus" {
           storageSpec = {
             volumeClaimTemplate = {
               spec = {
-                storageClassName = "gp2" # Ensure this matches your cluster's storage class
+                storageClassName = "gp2"
                 accessModes      = ["ReadWriteOnce"]
                 resources = {
                   requests = {
-                    storage = "20Gi" # Reduced size for faster provisioning
+                    storage = "20Gi"
                   }
                 }
               }
@@ -106,8 +106,8 @@ resource "helm_release" "prometheus" {
         }
         persistence = {
           enabled          = true
-          storageClassName = "gp2" # Ensure this matches your cluster's storage class
-          size             = "5Gi" # Reduced size
+          storageClassName = "gp2" 
+          size             = "5Gi" 
         }
         adminPassword = "admin123"
         resources = {
@@ -149,4 +149,4 @@ resource "helm_release" "prometheus" {
   ]
 
   depends_on = [kubernetes_namespace.monitoring]
-}
+} 

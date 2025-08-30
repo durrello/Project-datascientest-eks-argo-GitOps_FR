@@ -101,7 +101,7 @@ kubectl port-forward svc/argocd-server -n argocd 8080:443
 # Port-forward with HTTP (insecure mode) - When running Locally
 kubectl -n argocd port-forward svc/argocd-server 8080:80
 
-# Access at: https://localhost:8080
+# Access at: https://127.0.0.1:8080
 # Username: admin
 # Password: (from the command above)
 ```

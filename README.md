@@ -10,6 +10,8 @@
 ```bash
 aws sts get-caller-identity --query Account --output text
 ```
+## Step 0: Build the infrastructure
+Follow this to build your infrastructure: [Link to infra setup](Livrables/infra/README.md)
 
 ## Step 1: Configure kubectl for EKS
 
@@ -21,24 +23,8 @@ aws eks update-kubeconfig --region us-east-1 --name my-eks-cluster
 kubectl get nodes
 ```
 
-## Step 2: Build and Push Your Docker Image
-
-```bash
-# Build docker image
-docker build -t reddit-clone-app .
-
-# Tag your Reddit clone image
-docker tag reddit-clone-app:latest <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/reddit-clone:latest
-
-# Create ECR repository (if not exists)
-aws ecr create-repository --repository-name reddit-clone --region us-east-1
-
-# Get login token and login to ECR
-aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com
-
-# Push the image
-docker push <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/reddit-clone:latest
-```
+## Step 2: Build and Push Your Image
+Follow this to build your image and push to either docker hub or aws elastic container registry: [Link to infra setup](Livrables/app/README.md)
 
 ## Step 3: Access ArgoCD
 
@@ -49,7 +35,7 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.pas
 # Port forward to access ArgoCD UI
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 
-# Access ArgoCD at https://localhost:8080
+# Access ArgoCD at https://127.0.0.1:8080
 # Username: admin
 # Password: (from the command above)
 ```
