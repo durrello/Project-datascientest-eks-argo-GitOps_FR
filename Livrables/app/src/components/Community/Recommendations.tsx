@@ -72,7 +72,7 @@ const Recommendations: React.FC<RecommendationsProps> = () => {
         bgGradient="linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.75)),
         url('images/recCommsArt.png')"
       >
-        Top Communities
+        Datascientest Communities
       </Flex>
       <Flex direction="column">
         {loading ? (
