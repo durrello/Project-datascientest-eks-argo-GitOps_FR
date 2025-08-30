@@ -1,92 +1,81 @@
-# .gitlab-ci.yml
-image:
-  name: hashicorp/terraform:1.6
-  entrypoint:
-    - '/usr/bin/env'
-    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+stages:
+  - build
+  - docker-push
+  - terraform-init
+  - terraform-plan
+  - terraform-apply
+  - terraform-destroy
 
 variables:
-  TF_ROOT: ${CI_PROJECT_DIR}
-  TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/default
-  TF_VAR_aws_region: "us-east-1"
-  TF_VAR_cluster_name: "eks-${CI_ENVIRONMENT_SLUG}"
-  TF_VAR_vpc_name: "vpc-${CI_ENVIRONMENT_SLUG}"
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_IMAGE: "$DOCKER_REGISTRY/yourusername/your-image"
+  TERRAFORM_DIR: "Livrables/infra"
+  DOCKER_DIR: "Livrables/app" 
+  TF_VAR_image_tag: "latest" 
 
-before_script:
-  - cd ${TF_ROOT}
-  - terraform --version
-  - terraform init -backend-config="address=${TF_ADDRESS}" -backend-config="lock_address=${TF_ADDRESS}/lock" -backend-config="unlock_address=${TF_ADDRESS}/lock" -backend-config="username=${GITLAB_USER_LOGIN}" -backend-config="password=${CI_JOB_TOKEN}" -backend-config="lock_method=POST" -backend-config="unlock_method=DELETE" -backend-config="retry_wait_min=5"
-
-cache:
-  key: "${TF_ROOT}"
-  paths:
-    - ${TF_ROOT}/.terraform
-
-stages:
-  - validate
-  - plan
-  - apply
-  - destroy
-
-validate:
-  stage: validate
+# Manual job to build Docker image
+build_image:
+  stage: build
   script:
-    - terraform fmt -check
-    - terraform validate
-  rules:
-    - if: $CI_MERGE_REQUEST_IID
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
-plan:
-  stage: plan
+    - echo "Building Docker image..."
+    - cd $DOCKER_DIR
+    - docker build -t $DOCKER_IMAGE:$CI_COMMIT_REF_NAME .
+  only:
+    - master
+    - merge_requests
+  when: manual 
+docker_push:
+  stage: docker-push
   script:
-    - terraform plan -out="planfile" -var="key_pair_name=${AWS_KEY_PAIR_NAME}"
+    - echo "Pushing Docker image to Docker Hub..."
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+    - docker push $DOCKER_IMAGE:$CI_COMMIT_REF_NAME
+  only:
+    - master
+    - merge_requests
+  when: manual 
   dependencies:
-    - validate
-  artifacts:
-    name: plan
-    paths:
-      - ${TF_ROOT}/planfile
-    reports:
-      terraform: ${TF_ROOT}/planfile.json
-  rules:
-    - if: $CI_MERGE_REQUEST_IID
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
-plan:json:
-  stage: plan
-  extends: plan
+    - build_image  
+terraform_init:
+  stage: terraform-init
   script:
-    - terraform plan -out="planfile" -var="key_pair_name=${AWS_KEY_PAIR_NAME}"
-    - terraform show -json planfile > planfile.json
-  artifacts:
-    name: plan-json
-    paths:
-      - ${TF_ROOT}/planfile.json
-
-apply:
-  stage: apply
+    - echo "Initializing Terraform..."
+    - cd $TERRAFORM_DIR
+    - terraform init
+  only:
+    - master
+  when: manual  
+terraform_plan:
+  stage: terraform-plan
   script:
-    - terraform apply -input=false "planfile"
+    - echo "Planning Terraform infrastructure..."
+    - cd $TERRAFORM_DIR
+    - terraform plan -var="image_tag=$CI_COMMIT_REF_NAME"
+  only:
+    - master
+  when: manual 
   dependencies:
-    - plan
-  environment:
-    name: production
-    action: start
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      when: manual
-      allow_failure: false
+    - terraform_init
 
-destroy:
-  stage: destroy
+terraform_apply:
+  stage: terraform-apply
   script:
-    - terraform destroy -auto-approve -var="key_pair_name=${AWS_KEY_PAIR_NAME}"
-  environment:
-    name: production
-    action: stop
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-      when: manual
-      allow_failure: false
-  dependencies: []
+    - echo "Applying Terraform infrastructure..."
+    - cd $TERRAFORM_DIR
+    - terraform apply -var="image_tag=$CI_COMMIT_REF_NAME" -auto-approve
+  only:
+    - master
+  when: manual 
+  dependencies:
+    - terraform_plan
+terraform_destroy:
+  stage: terraform-destroy
+  script:
+    - echo "Destroying Terraform infrastructure..."
+    - cd $TERRAFORM_DIR
+    - terraform destroy -var="image_tag=$CI_COMMIT_REF_NAME" -auto-approve
+  only:
+    - master
+  when: manual
+  dependencies:
+    - terraform_plan
