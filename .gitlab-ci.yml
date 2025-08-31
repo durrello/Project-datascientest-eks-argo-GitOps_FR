@@ -57,79 +57,29 @@ app-build:
       changes:
         - Livrables/app/**/*
 
-# Test the built image (optional)
-app-test:
-  stage: app-build
-  image: docker:24.0.5
-  services:
-    - docker:24.0.5-dind
-  variables:
-    DOCKER_HOST: tcp://docker:2376
-    DOCKER_TLS_CERTDIR: "/certs"
-  script:
-    - echo "Testing Docker image..."
-    - docker pull ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
-    - docker run --rm ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG} echo "Container test successful"
-  dependencies:
-    - app-build
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - Livrables/app/**/*
-    - if: '$CI_COMMIT_BRANCH'
-      changes:
-        - Livrables/app/**/*
+# # Test the built image (optional)
+# app-test:
+#   stage: app-build
+#   image: docker:24.0.5
+#   services:
+#     - docker:24.0.5-dind
+#   variables:
+#     DOCKER_HOST: tcp://docker:2376
+#     DOCKER_TLS_CERTDIR: "/certs"
+#   script:
+#     - echo "Testing Docker image..."
+#     - docker pull ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
+#     - docker run --rm ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG} echo "Container test successful"
+#   dependencies:
+#     - app-build
+#   rules:
+#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+#       changes:
+#         - Livrables/app/**/*
+#     - if: '$CI_COMMIT_BRANCH'
+#       changes:
+#         - Livrables/app/**/*
 
-# Deploy app to staging (automatic)
-app-deploy-staging:
-  stage: app-deploy
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache curl
-  script:
-    - echo "Deploying app to staging environment..."
-    - echo "Image ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
-    - echo "Add your deployment commands here (kubectl, docker-compose, etc.)"
-    # Example deployment commands:
-    # - kubectl set image deployment/myapp myapp=${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
-    # - docker-compose up -d
-  dependencies:
-    - app-build
-  environment:
-    name: staging-app
-    url: https://staging.yourapp.com
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      changes:
-        - Livrables/app/**/*
-      when: on_success
-    - if: '$CI_COMMIT_BRANCH != "develop"'
-      changes:
-        - Livrables/app/**/*
-      when: manual
-
-# Deploy app to production (manual)
-app-deploy-production:
-  stage: app-deploy
-  image: alpine:latest
-  before_script:
-    - apk add --no-cache curl
-  script:
-    - echo "Deploying app to production environment..."
-    - echo "Image ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
-    - echo "Add your production deployment commands here"
-    # Example production deployment:
-    # - kubectl set image deployment/myapp-prod myapp=${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
-  dependencies:
-    - app-build
-  environment:
-    name: production-app
-    url: https://yourapp.com
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
-      changes:
-        - Livrables/app/**/*
-      when: manual
 
 # =============================================================================
 # INFRASTRUCTURE PIPELINE - Complete separate workflow
