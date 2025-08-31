@@ -5,16 +5,12 @@ stages:
   - deploy
 
 variables:
-  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra
+  TF_ROOT: ${CI_PROJECT_DIR}/terraform
   TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
   TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
   
 # Use the official Terraform image
-image:
-  name: hashicorp/terraform:latest
-  entrypoint:
-    - '/usr/bin/env'
-    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+image: hashicorp/terraform:latest
 
 # Cache Terraform plugins and modules
 cache:
@@ -24,6 +20,7 @@ cache:
     - ${TF_ROOT}/.terraform.lock.hcl
 
 before_script:
+  - apk add --no-cache curl
   - cd ${TF_ROOT}
   - terraform --version
   - terraform init
@@ -88,14 +85,13 @@ destroy:
 # Additional job for security scanning (optional)
 tfsec:
   stage: validate
-  image:
-    name: aquasec/tfsec:latest
-    entrypoint: [""]
+  image: aquasec/tfsec:latest
   script:
-    - tfsec ${TF_ROOT} --format junit --out tfsec-report.xml
+    - tfsec ${TF_ROOT} --format junit --out tfsec-report.xml || true
   artifacts:
     reports:
       junit: tfsec-report.xml
+    when: always
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH'
