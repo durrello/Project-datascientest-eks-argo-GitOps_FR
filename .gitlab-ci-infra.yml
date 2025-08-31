@@ -1,5 +1,6 @@
 stages:
   - backend-setup
+  - terraform-init
   - infra-validate
   - infra-plan
   - infra-deploy
@@ -24,6 +25,15 @@ backend-setup:
     - terraform init
     - terraform apply -auto-approve
 
+terraform-init:
+  stage: terraform-init
+  extends: .backend-base
+  script:
+    - cd $TF_ROOT
+    - terraform init -input=false -upgrade
+  needs:
+    - backend-setup
+
 infra-validate:
   stage: infra-validate
   extends: .backend-base
@@ -31,6 +41,8 @@ infra-validate:
     - cd ${TF_ROOT}
     - terraform validate
     - terraform fmt -check
+  needs:
+    - terraform-init
 
 infra-plan:
   stage: infra-plan
@@ -42,8 +54,11 @@ infra-plan:
     paths:
       - ${TF_ROOT}/tfplan
     expire_in: 7 days
+  needs:
+    - infra-validate
 
-infra-apply-staging:
+# Last stage: manual apply or destroy
+infra-apply:
   stage: infra-deploy
   extends: .backend-base
   script:
@@ -51,5 +66,21 @@ infra-apply-staging:
     - terraform apply -auto-approve tfplan
   dependencies:
     - infra-plan
+  needs:
+    - infra-plan
   environment:
-    name: staging
+    name: production
+  rules:
+    - when: manual
+
+infra-destroy:
+  stage: infra-deploy
+  extends: .backend-base
+  script:
+    - cd ${TF_ROOT}
+    - terraform destroy -auto-approve
+  environment:
+    name: production
+    action: stop
+  rules:
+    - when: manual
