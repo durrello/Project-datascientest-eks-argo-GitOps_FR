@@ -6,7 +6,6 @@
 .vscode/
 .DS_Store
 *.log
-*.tfvars
 override.tf
 override.tf.json
 *_override.tf
