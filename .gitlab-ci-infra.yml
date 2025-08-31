@@ -16,6 +16,11 @@ variables:
   image:
     name: hashicorp/terraform:latest
     entrypoint: [""]
+  cache:
+    key: "${TF_CACHE_KEY}"
+    paths:
+      - ${TF_ROOT}/.terraform/
+      - ${TF_ROOT}/.terraform.lock.hcl
 
 backend-setup:
   stage: backend-setup
@@ -37,8 +42,14 @@ infra-initialise:
 infra-validate:
   stage: infra-validate
   extends: .backend-base
+  cache:
+    key: terraform
+    paths:
+      - ${TF_ROOT}/.terraform
+      - ${TF_ROOT}/.terraform.lock.hcl
   script:
     - cd ${TF_ROOT}
+    - terraform init -input=false
     - terraform validate
     - terraform fmt -check
   needs:
@@ -47,8 +58,14 @@ infra-validate:
 infra-plan:
   stage: infra-plan
   extends: .backend-base
+  cache:
+    key: terraform
+    paths:
+      - ${TF_ROOT}/.terraform
+      - ${TF_ROOT}/.terraform.lock.hcl
   script:
     - cd ${TF_ROOT}
+    - terraform init -input=false
     - terraform plan -out=tfplan
   artifacts:
     paths:
@@ -60,9 +77,15 @@ infra-plan:
 # Last stage: manual apply or destroy
 infra-apply:
   stage: infra-deploy
+  cache:
+    key: terraform
+    paths:
+      - ${TF_ROOT}/.terraform
+      - ${TF_ROOT}/.terraform.lock.hcl
   extends: .backend-base
   script:
     - cd ${TF_ROOT}
+    - terraform init -input=false
     - terraform apply -auto-approve tfplan
   dependencies:
     - infra-plan
@@ -76,8 +99,14 @@ infra-apply:
 infra-destroy:
   stage: infra-deploy
   extends: .backend-base
+  cache:
+    key: terraform
+    paths:
+      - ${TF_ROOT}/.terraform
+      - ${TF_ROOT}/.terraform.lock.hcl
   script:
     - cd ${TF_ROOT}
+    - terraform init -input=false
     - terraform destroy -auto-approve
   environment:
     name: production
