@@ -1,81 +1,102 @@
+# .gitlab-ci.yml
 stages:
-  - build
-  - docker-push
-  - terraform-init
-  - terraform-plan
-  - terraform-apply
-  - terraform-destroy
+  - validate
+  - plan
+  - deploy
 
 variables:
-  DOCKER_REGISTRY: "docker.io"
-  DOCKER_IMAGE: "$DOCKER_REGISTRY/yourusername/your-image"
-  TERRAFORM_DIR: "Livrables/infra"
-  DOCKER_DIR: "Livrables/app" 
-  TF_VAR_image_tag: "latest" 
+  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra
+  TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
+  TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
+  
+# Use the official Terraform image
+image:
+  name: hashicorp/terraform:latest
+  entrypoint:
+    - '/usr/bin/env'
+    - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
-# Manual job to build Docker image
-build_image:
-  stage: build
-  script:
-    - echo "Building Docker image..."
-    - cd $DOCKER_DIR
-    - docker build -t $DOCKER_IMAGE:$CI_COMMIT_REF_NAME .
-  only:
-    - master
-    - merge_requests
-  when: manual 
-docker_push:
-  stage: docker-push
-  script:
-    - echo "Pushing Docker image to Docker Hub..."
-    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-    - docker push $DOCKER_IMAGE:$CI_COMMIT_REF_NAME
-  only:
-    - master
-    - merge_requests
-  when: manual 
-  dependencies:
-    - build_image  
-terraform_init:
-  stage: terraform-init
-  script:
-    - echo "Initializing Terraform..."
-    - cd $TERRAFORM_DIR
-    - terraform init
-  only:
-    - master
-  when: manual  
-terraform_plan:
-  stage: terraform-plan
-  script:
-    - echo "Planning Terraform infrastructure..."
-    - cd $TERRAFORM_DIR
-    - terraform plan -var="image_tag=$CI_COMMIT_REF_NAME"
-  only:
-    - master
-  when: manual 
-  dependencies:
-    - terraform_init
+# Cache Terraform plugins and modules
+cache:
+  key: "${TF_CACHE_KEY}"
+  paths:
+    - ${TF_ROOT}/.terraform
+    - ${TF_ROOT}/.terraform.lock.hcl
 
-terraform_apply:
-  stage: terraform-apply
+before_script:
+  - cd ${TF_ROOT}
+  - terraform --version
+  - terraform init
+
+# Validate Terraform configuration
+validate:
+  stage: validate
   script:
-    - echo "Applying Terraform infrastructure..."
-    - cd $TERRAFORM_DIR
-    - terraform apply -var="image_tag=$CI_COMMIT_REF_NAME" -auto-approve
-  only:
-    - master
-  when: manual 
-  dependencies:
-    - terraform_plan
-terraform_destroy:
-  stage: terraform-destroy
+    - terraform validate
+    - terraform fmt -check
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+# Plan Terraform changes
+plan:
+  stage: plan
   script:
-    - echo "Destroying Terraform infrastructure..."
-    - cd $TERRAFORM_DIR
-    - terraform destroy -var="image_tag=$CI_COMMIT_REF_NAME" -auto-approve
-  only:
-    - master
-  when: manual
+    - terraform plan -input=false -out=tfplan
+  artifacts:
+    name: plan
+    paths:
+      - ${TF_ROOT}/tfplan
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+# Apply Terraform changes (manual for production)
+apply:
+  stage: deploy
+  script:
+    - terraform apply -input=false tfplan
   dependencies:
-    - terraform_plan
+    - plan
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: on_success
+  environment:
+    name: $CI_COMMIT_REF_SLUG
+    on_stop: destroy
+
+# Destroy infrastructure (manual only)
+destroy:
+  stage: deploy
+  script:
+    - terraform destroy -auto-approve
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+      allow_failure: false
+  environment:
+    name: $CI_COMMIT_REF_SLUG
+    action: stop
+
+# Additional job for security scanning (optional)
+tfsec:
+  stage: validate
+  image:
+    name: aquasec/tfsec:latest
+    entrypoint: [""]
+  script:
+    - tfsec ${TF_ROOT} --format junit --out tfsec-report.xml
+  artifacts:
+    reports:
+      junit: tfsec-report.xml
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+  allow_failure: true
