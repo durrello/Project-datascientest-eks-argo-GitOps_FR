@@ -24,8 +24,8 @@ node_groups = {
 }
 
 sonarqube_instance_type = "t3.medium"
-key_pair_name           = "test" 
-sonarqube_allowed_cidrs = ["0.0.0.0/0"] 
+key_pair_name           = "test"
+sonarqube_allowed_cidrs = ["0.0.0.0/0"]
 
 common_tags = {
   Environment = "development"

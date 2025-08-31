@@ -92,7 +92,7 @@ module "helm_charts" {
     helm       = helm
     kubernetes = kubernetes
   }
-  depends_on = [module.eks] 
+  depends_on = [module.eks]
 }
 
 # SonarQube EC2 Module
