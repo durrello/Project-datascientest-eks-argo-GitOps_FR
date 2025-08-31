@@ -1,19 +1,18 @@
 stages:
   - select
 
-# Selector jobs -> trigger child pipelines
+# Selector job for App
 run-app-pipeline:
   stage: select
-  script: echo "Triggering App pipeline..."
   rules:
     - when: manual
   trigger:
     include: .gitlab-ci-app.yml
     strategy: depend
 
+# Selector job for Infra
 run-infra-pipeline:
   stage: select
-  script: echo "Triggering Infra pipeline..."
   rules:
     - when: manual
   trigger:
