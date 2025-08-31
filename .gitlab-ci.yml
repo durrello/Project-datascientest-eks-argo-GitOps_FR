@@ -1,16 +1,17 @@
-include:
-  - local: '.gitlab-ci-app.yml'
-    rules:
-      - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_PROJECT_PATH =~ /app/'   # or some condition that identifies an app pipeline
-        when: always
-      - if: '$CI_COMMIT_BRANCH && $CI_PROJECT_PATH =~ /app/'
-        when: always
-      - when: never
+trigger_app_pipeline:
+  stage: trigger
+  script: []
+  trigger:
+    include: app-pipeline.yml
+  rules:
+    - when: manual
+      allow_failure: false
 
-  - local: '.gitlab-ci-infra.yml'
-    rules:
-      - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $CI_PROJECT_PATH =~ /infra/' # or condition for infra pipeline
-        when: always
-      - if: '$CI_COMMIT_BRANCH && $CI_PROJECT_PATH =~ /infra/'
-        when: always
-      - when: never
+trigger_infra_pipeline:
+  stage: trigger
+  script: []
+  trigger:
+    include: infra-pipeline.yml
+  rules:
+    - when: manual
+      allow_failure: false
