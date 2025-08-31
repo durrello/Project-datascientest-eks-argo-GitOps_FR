@@ -118,6 +118,7 @@ backend-setup:
 # Validate backend setup
 backend-validate:
   stage: backend-setup
+  needs: []
   extends: .backend-base
   script:
     - terraform validate
@@ -187,6 +188,7 @@ backend-validate:
 # Validate Terraform configuration
 infra-validate:
   stage: infra-validate
+  needs: []
   extends: .terraform-base
   script:
     - terraform validate
@@ -195,6 +197,7 @@ infra-validate:
 # Security scanning for Terraform
 infra-security-scan:
   stage: infra-validate
+  needs: []
   image:
     name: aquasec/tfsec:latest
     entrypoint: [""]
