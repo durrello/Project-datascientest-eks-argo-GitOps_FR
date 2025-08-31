@@ -4,8 +4,13 @@ include:
 
 stages:
   - select
+  - app-build
+  - backend-setup
+  - infra-validate
+  - infra-plan
+  - infra-deploy
 
-# Selector jobs (appear as buttons in GitLab UI)
+# Selector jobs
 run-app-pipeline:
   stage: select
   script: echo "Triggering App pipeline..."
