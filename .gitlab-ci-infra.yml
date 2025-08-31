@@ -1,0 +1,160 @@
+stages:
+  - backend-setup
+  - infra-validate
+  - infra-plan
+  - infra-deploy
+
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra/main
+  BACKEND_ROOT: ${CI_PROJECT_DIR}/Livrables/infra/backend
+  TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
+  TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
+  TF_STATE_BUCKET: ""
+  TF_STATE_LOCK_TABLE: ""
+  AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
+
+workflow:
+  rules:
+    # Trigger only on infra/backend changes
+    - changes:
+        - Livrables/infra/**/*
+        - Livrables/backend/**/*
+    # Or run manually with variable
+    - if: '$RUN_INFRA_PIPELINE == "true"'
+    - when: never
+
+# Backend setup jobs
+.backend-base:
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
+  before_script:
+    - cd ${BACKEND_ROOT}
+    - terraform --version
+    - terraform init
+
+backend-setup:
+  stage: backend-setup
+  extends: .backend-base
+  script:
+    - terraform validate
+    - terraform plan -out=backend-plan
+    - terraform apply -input=false backend-plan
+    - terraform output -raw s3_bucket_name > ../s3_bucket.txt
+    - terraform output -raw dynamodb_table_name > ../dynamodb_table.txt
+  artifacts:
+    paths:
+      - s3_bucket.txt
+      - dynamodb_table.txt
+    expire_in: 1 day
+
+backend-validate:
+  stage: backend-setup
+  extends: .backend-base
+  script:
+    - terraform validate
+    - terraform fmt -check
+
+# Terraform infra jobs
+.terraform-base:
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
+  cache:
+    key: "${TF_CACHE_KEY}"
+    paths:
+      - ${TF_ROOT}/.terraform
+      - ${TF_ROOT}/.terraform.lock.hcl
+  before_script:
+    - cd ${TF_ROOT}
+    - terraform --version
+    - |
+      if [ -f "../s3_bucket.txt" ] && [ -f "../dynamodb_table.txt" ]; then
+        export TF_STATE_BUCKET=$(cat ../s3_bucket.txt)
+        export TF_STATE_LOCK_TABLE=$(cat ../dynamodb_table.txt)
+      fi
+    - |
+      cat > backend.tf << EOF
+      terraform {
+        backend "s3" {
+          bucket         = "${TF_STATE_BUCKET}"
+          key            = "environments/${TF_STATE_NAME}/terraform.tfstate"
+          region         = "${AWS_DEFAULT_REGION}"
+          dynamodb_table = "${TF_STATE_LOCK_TABLE}"
+          encrypt        = true
+        }
+      }
+      EOF
+    - terraform init -reconfigure
+
+infra-validate:
+  stage: infra-validate
+  extends: .terraform-base
+  script:
+    - terraform validate
+    - terraform fmt -check
+
+infra-plan:
+  stage: infra-plan
+  extends: .terraform-base
+  script:
+    - terraform plan -input=false -out=tfplan
+    - terraform show -json tfplan > tfplan.json
+  artifacts:
+    name: terraform-plan-${CI_COMMIT_SHORT_SHA}
+    paths:
+      - ${TF_ROOT}/tfplan
+      - ${TF_ROOT}/tfplan.json
+    expire_in: 7 days
+    reports:
+      terraform: ${TF_ROOT}/tfplan.json
+
+infra-apply-staging:
+  stage: infra-deploy
+  extends: .terraform-base
+  script:
+    - terraform apply -input=false tfplan
+  dependencies:
+    - infra-plan
+  environment:
+    name: staging-infra
+    on_stop: infra-destroy-staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: on_success
+    - if: '$CI_COMMIT_BRANCH != "develop"'
+      when: manual
+
+infra-apply-production:
+  stage: infra-deploy
+  extends: .terraform-base
+  script:
+    - terraform apply -input=false tfplan
+  dependencies:
+    - infra-plan
+  environment:
+    name: production-infra
+    on_stop: infra-destroy-production
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      when: manual
+
+infra-destroy-staging:
+  stage: infra-deploy
+  extends: .terraform-base
+  script:
+    - terraform destroy -auto-approve
+  environment:
+    name: staging-infra
+    action: stop
+  when: manual
+
+infra-destroy-production:
+  stage: infra-deploy
+  extends: .terraform-base
+  script:
+    - terraform destroy -auto-approve
+  environment:
+    name: production-infra
+    action: stop
+  when: manual

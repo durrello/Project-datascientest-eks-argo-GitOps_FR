@@ -6,6 +6,15 @@ variables:
   DOCKER_TAG: ${CI_COMMIT_SHORT_SHA}
   APP_ROOT: ${CI_PROJECT_DIR}/Livrables/app
 
+workflow:
+  rules:
+    # Trigger only on app changes
+    - changes:
+        - Livrables/app/**/*
+    # Or run manually with variable
+    - if: '$RUN_APP_PIPELINE == "true"'
+    - when: never
+
 app-build:
   stage: app-build
   image: docker:24.0.5
@@ -24,15 +33,11 @@ app-build:
     - echo "Pushing Docker image to registry..."
     - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
     - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest
-    - echo "Successfully pushed ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
+  artifacts:
+    reports:
+      dotenv: build.env
+    expire_in: 1 hour
   after_script:
     - docker logout
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - Livrables/app/**/*
-      when: manual
-    - if: '$CI_COMMIT_BRANCH'
-      changes:
-        - Livrables/app/**/*
-      when: manual
+    - echo "IMAGE_TAG=${DOCKER_TAG}" > build.env
+    - echo "FULL_IMAGE_NAME=${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}" >> build.env

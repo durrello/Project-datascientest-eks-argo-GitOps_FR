@@ -1,17 +1,23 @@
-trigger_app_pipeline:
-  stage: trigger
-  script: []
-  trigger:
-    include: app-pipeline.yml
-  rules:
-    - when: manual
-      allow_failure: false
+include:
+  - local: '.gitlab-ci-app.yml'
+  - local: '.gitlab-ci-infra.yml'
 
-trigger_infra_pipeline:
-  stage: trigger
-  script: []
-  trigger:
-    include: infra-pipeline.yml
+stages:
+  - select
+
+# Selector jobs (appear as buttons in GitLab UI)
+run-app-pipeline:
+  stage: select
+  script: echo "Triggering App pipeline..."
   rules:
     - when: manual
-      allow_failure: false
+  variables:
+    RUN_APP_PIPELINE: "true"
+
+run-infra-pipeline:
+  stage: select
+  script: echo "Triggering Infra pipeline..."
+  rules:
+    - when: manual
+  variables:
+    RUN_INFRA_PIPELINE: "true"
