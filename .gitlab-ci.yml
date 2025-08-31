@@ -60,12 +60,10 @@ app-build:
       changes:
         - Livrables/app/**/*
       when: manual
-    - when: never
     - if: '$CI_COMMIT_BRANCH'
       changes:
         - Livrables/app/**/*
       when: manual
-    - when: never
 
 # =============================================================================
 # BACKEND SETUP - Create S3 bucket and DynamoDB table for Terraform state
