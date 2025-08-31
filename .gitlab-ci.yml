@@ -88,6 +88,7 @@ app-build:
 # Setup the Terraform backend infrastructure
 backend-setup:
   stage: backend-setup
+  needs: []
   extends: .backend-base
   script:
     - echo "Setting up Terraform backend infrastructure..."
@@ -312,6 +313,7 @@ infra-destroy-staging:
 # Destroy production infrastructure  
 infra-destroy-production:
   stage: infra-deploy
+  needs: []
   extends: .terraform-base
   script:
     - echo "=== Current State Before Destroy ==="
