@@ -1,7 +1,6 @@
 # .gitlab-ci.yml
 stages:
   - app-build
-  - app-deploy
   - infra-validate
   - infra-plan
   - infra-deploy
