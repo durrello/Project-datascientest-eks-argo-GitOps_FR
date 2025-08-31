@@ -39,7 +39,7 @@ build-docker:
     - echo "Pushing Docker image..."
     - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
     - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest
-    - echo "Image pushed: ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
+    - echo "Image pushed ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
   rules:
     # Only run when there are changes in the app directory
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -178,7 +178,7 @@ deploy-full-stack:
   image: alpine:latest
   script:
     - echo "Full stack deployment complete!"
-    - echo "Docker image: ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
+    - echo "Docker image ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
     - echo "Infrastructure applied via Terraform"
   dependencies:
     - build-docker
