@@ -59,9 +59,11 @@ app-build:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
         - Livrables/app/**/*
+      when: manual
     - if: '$CI_COMMIT_BRANCH'
       changes:
         - Livrables/app/**/*
+      when: manual
 
 # =============================================================================
 # BACKEND SETUP - Create S3 bucket and DynamoDB table for Terraform state

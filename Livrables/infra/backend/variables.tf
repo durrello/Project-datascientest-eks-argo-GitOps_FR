@@ -5,7 +5,7 @@ variable "project_name" {
   description = "Name of the project (used for naming resources)"
   type        = string
   default     = "reddit-clone"
-  
+
   validation {
     condition     = can(regex("^[a-z0-9-]+$", var.project_name))
     error_message = "Project name must only contain lowercase letters, numbers, and hyphens."
@@ -16,7 +16,7 @@ variable "aws_region" {
   description = "AWS region for backend resources"
   type        = string
   default     = "us-east-1"
-  
+
   validation {
     condition = contains([
       "us-east-1", "us-east-2", "us-west-1", "us-west-2",

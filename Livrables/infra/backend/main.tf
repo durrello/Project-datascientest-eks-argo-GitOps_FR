@@ -13,7 +13,7 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
-  
+
   default_tags {
     tags = {
       Project     = var.project_name
@@ -92,9 +92,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "terraform_state" {
 
 # DynamoDB table for state locking
 resource "aws_dynamodb_table" "terraform_locks" {
-  name           = "${var.project_name}-terraform-locks"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "LockID"
+  name         = "${var.project_name}-terraform-locks"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
 
   attribute {
     name = "LockID"
@@ -133,9 +133,9 @@ output "dynamodb_table_arn" {
 }
 
 output "setup_complete_message" {
-  value = <<-EOT
+  value       = <<-EOT
     
-    🎉 Backend infrastructure setup complete!
+    Backend infrastructure setup complete!
     
     S3 Bucket: ${aws_s3_bucket.terraform_state.bucket}
     DynamoDB Table: ${aws_dynamodb_table.terraform_locks.name}
