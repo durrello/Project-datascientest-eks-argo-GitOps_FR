@@ -1,6 +1,7 @@
 # .gitlab-ci.yml
 stages:
   - app-build
+  - backend-setup
   - infra-validate
   - infra-plan
   - infra-deploy
@@ -12,9 +13,15 @@ variables:
   APP_ROOT: ${CI_PROJECT_DIR}/Livrables/app
   
   # Infrastructure variables
-  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra
+  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra/main
+  BACKEND_ROOT: ${CI_PROJECT_DIR}/Livrables/infra/backend
   TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
   TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
+  
+  # Backend configuration (will be set by backend-setup job)
+  TF_STATE_BUCKET: ""
+  TF_STATE_LOCK_TABLE: ""
+  AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
 
 # =============================================================================
 # APP PIPELINE - Complete separate workflow
@@ -56,32 +63,72 @@ app-build:
       changes:
         - Livrables/app/**/*
 
-# # Test the built image (optional)
-# app-test:
-#   stage: app-build
-#   image: docker:24.0.5
-#   services:
-#     - docker:24.0.5-dind
-#   variables:
-#     DOCKER_HOST: tcp://docker:2376
-#     DOCKER_TLS_CERTDIR: "/certs"
-#   script:
-#     - echo "Testing Docker image..."
-#     - docker pull ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
-#     - docker run --rm ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG} echo "Container test successful"
-#   dependencies:
-#     - app-build
-#   rules:
-#     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-#       changes:
-#         - Livrables/app/**/*
-#     - if: '$CI_COMMIT_BRANCH'
-#       changes:
-#         - Livrables/app/**/*
+# =============================================================================
+# BACKEND SETUP - Create S3 bucket and DynamoDB table for Terraform state
+# =============================================================================
 
+.backend-base:
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
+  before_script:
+    - cd ${BACKEND_ROOT}
+    - terraform --version
+    - terraform init
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Livrables/backend/**/*
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/backend/**/*
+
+# Setup the Terraform backend infrastructure
+backend-setup:
+  stage: backend-setup
+  extends: .backend-base
+  script:
+    - echo "Setting up Terraform backend infrastructure..."
+    - terraform validate
+    - terraform plan -out=backend-plan
+    - terraform apply -input=false backend-plan
+    - echo "=== Backend Setup Complete ==="
+    - terraform output -raw s3_bucket_name > ../s3_bucket.txt
+    - terraform output -raw dynamodb_table_name > ../dynamodb_table.txt
+    - echo "S3 Bucket $(cat ../s3_bucket.txt)"
+    - echo "DynamoDB Table $(cat ../dynamodb_table.txt)"
+  artifacts:
+    paths:
+      - s3_bucket.txt
+      - dynamodb_table.txt
+    expire_in: 1 day
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      changes:
+        - Livrables/backend/**/*
+      when: manual
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/backend/**/*
+      when: manual
+
+# Validate backend setup
+backend-validate:
+  stage: backend-setup
+  extends: .backend-base
+  script:
+    - terraform validate
+    - terraform fmt -check
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Livrables/backend/**/*
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/backend/**/*
 
 # =============================================================================
-# INFRASTRUCTURE PIPELINE - Complete separate workflow
+# INFRASTRUCTURE PIPELINE - Uses the backend created above
 # =============================================================================
 
 .terraform-base:
@@ -96,7 +143,36 @@ app-build:
   before_script:
     - cd ${TF_ROOT}
     - terraform --version
-    - terraform init
+    # Get backend configuration from setup artifacts or fallback
+    - |
+      if [ -f "../s3_bucket.txt" ] && [ -f "../dynamodb_table.txt" ]; then
+        export TF_STATE_BUCKET=$(cat ../s3_bucket.txt)
+        export TF_STATE_LOCK_TABLE=$(cat ../dynamodb_table.txt)
+        echo "Using backend from setup S3=$TF_STATE_BUCKET DynamoDB=$TF_STATE_LOCK_TABLE"
+      else
+        # Fallback to predefined values or error
+        if [ -z "$TF_STATE_BUCKET" ] || [ -z "$TF_STATE_LOCK_TABLE" ]; then
+          echo "ERROR Backend not configured. Run backend-setup first or set TF_STATE_BUCKET and TF_STATE_LOCK_TABLE variables"
+          exit 1
+        fi
+        echo "Using predefined backend S3=$TF_STATE_BUCKET DynamoDB=$TF_STATE_LOCK_TABLE"
+      fi
+    # Create backend configuration for S3
+    - |
+      cat > backend.tf << EOF
+      terraform {
+        backend "s3" {
+          bucket         = "${TF_STATE_BUCKET}"
+          key            = "environments/${TF_STATE_NAME}/terraform.tfstate"
+          region         = "${AWS_DEFAULT_REGION}"
+          dynamodb_table = "${TF_STATE_LOCK_TABLE}"
+          encrypt        = true
+        }
+      }
+      EOF
+    - terraform init -reconfigure
+  dependencies:
+    - backend-setup
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
@@ -140,11 +216,33 @@ infra-plan:
   extends: .terraform-base
   script:
     - terraform plan -input=false -out=tfplan
+    - terraform show -json tfplan > tfplan.json
   artifacts:
     name: terraform-plan-${CI_COMMIT_SHORT_SHA}
     paths:
       - ${TF_ROOT}/tfplan
+      - ${TF_ROOT}/tfplan.json
     expire_in: 7 days
+    reports:
+      terraform: ${TF_ROOT}/tfplan.json
+
+# Show current state for debugging
+infra-show-state:
+  stage: infra-plan
+  extends: .terraform-base
+  script:
+    - echo "=== Current Terraform State ==="
+    - terraform show
+    - echo "=== State List ==="
+    - terraform state list || echo "No state found"
+    - echo "=== Workspace ==="
+    - terraform workspace show
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/infra/**/*
+      when: manual
+  allow_failure: true
 
 # Apply infrastructure changes to staging
 infra-apply-staging:
@@ -152,6 +250,8 @@ infra-apply-staging:
   extends: .terraform-base
   script:
     - terraform apply -input=false tfplan
+    - echo "=== Resources Created ==="
+    - terraform state list
   dependencies:
     - infra-plan
   environment:
@@ -173,6 +273,8 @@ infra-apply-production:
   extends: .terraform-base
   script:
     - terraform apply -input=false tfplan
+    - echo "=== Resources Created ==="
+    - terraform state list
   dependencies:
     - infra-plan
   environment:
@@ -189,7 +291,13 @@ infra-destroy-staging:
   stage: infra-deploy
   extends: .terraform-base
   script:
+    - echo "=== Current State Before Destroy ==="
+    - terraform state list || echo "No state found"
+    - terraform show || echo "No resources to show"
+    - echo "=== Destroying Infrastructure ==="
     - terraform destroy -auto-approve
+    - echo "=== State After Destroy ==="
+    - terraform state list || echo "All resources destroyed"
   environment:
     name: staging-infra
     action: stop
@@ -199,12 +307,18 @@ infra-destroy-staging:
         - Livrables/infra/**/*
       when: manual
 
-# Destroy production infrastructure
+# Destroy production infrastructure  
 infra-destroy-production:
   stage: infra-deploy
   extends: .terraform-base
   script:
+    - echo "=== Current State Before Destroy ==="
+    - terraform state list || echo "No state found"
+    - terraform show || echo "No resources to show"
+    - echo "=== Destroying Infrastructure ==="
     - terraform destroy -auto-approve
+    - echo "=== State After Destroy ==="
+    - terraform state list || echo "All resources destroyed"
   environment:
     name: production-infra
     action: stop
@@ -213,4 +327,3 @@ infra-destroy-production:
       changes:
         - Livrables/infra/**/*
       when: manual
-      
