@@ -5,12 +5,15 @@ stages:
   - deploy
 
 variables:
-  TF_ROOT: ${CI_PROJECT_DIR}/terraform
+  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra
   TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
   TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
   
-# Use the official Terraform image
-image: hashicorp/terraform:latest
+# Use the official Terraform image with empty entrypoint
+image:
+  name: hashicorp/terraform:latest
+  entrypoint:
+    - ""
 
 # Cache Terraform plugins and modules
 cache:
@@ -20,7 +23,6 @@ cache:
     - ${TF_ROOT}/.terraform.lock.hcl
 
 before_script:
-  - apk add --no-cache curl
   - cd ${TF_ROOT}
   - terraform --version
   - terraform init
@@ -85,7 +87,9 @@ destroy:
 # Additional job for security scanning (optional)
 tfsec:
   stage: validate
-  image: aquasec/tfsec:latest
+  image:
+    name: aquasec/tfsec:latest
+    entrypoint: [""]
   script:
     - tfsec ${TF_ROOT} --format junit --out tfsec-report.xml || true
   artifacts:
