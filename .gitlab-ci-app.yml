@@ -6,15 +6,6 @@ variables:
   DOCKER_TAG: ${CI_COMMIT_SHORT_SHA}
   APP_ROOT: ${CI_PROJECT_DIR}/Livrables/app
 
-workflow:
-  rules:
-    # Trigger only on app changes
-    - changes:
-        - Livrables/app/**/*
-    # Or run manually with variable
-    - if: '$RUN_APP_PIPELINE == "true"'
-    - when: never
-
 app-build:
   stage: app-build
   image: docker:24.0.5
@@ -27,17 +18,7 @@ app-build:
     - echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USERNAME --password-stdin
   script:
     - cd ${APP_ROOT}
-    - echo "Building Docker image for app..."
     - docker build -t ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .
-    - docker build -t ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest .
-    - echo "Pushing Docker image to registry..."
     - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
-    - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest
-  artifacts:
-    reports:
-      dotenv: build.env
-    expire_in: 1 hour
   after_script:
     - docker logout
-    - echo "IMAGE_TAG=${DOCKER_TAG}" > build.env
-    - echo "FULL_IMAGE_NAME=${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}" >> build.env

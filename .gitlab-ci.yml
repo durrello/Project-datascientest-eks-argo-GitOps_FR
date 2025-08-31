@@ -1,28 +1,21 @@
-include:
-  - local: '.gitlab-ci-app.yml'
-  - local: '.gitlab-ci-infra.yml'
-
 stages:
   - select
-  - app-build
-  - backend-setup
-  - infra-validate
-  - infra-plan
-  - infra-deploy
 
-# Selector jobs
+# Selector jobs -> trigger child pipelines
 run-app-pipeline:
   stage: select
   script: echo "Triggering App pipeline..."
   rules:
     - when: manual
-  variables:
-    RUN_APP_PIPELINE: "true"
+  trigger:
+    include: .gitlab-ci-app.yml
+    strategy: depend
 
 run-infra-pipeline:
   stage: select
   script: echo "Triggering Infra pipeline..."
   rules:
     - when: manual
-  variables:
-    RUN_INFRA_PIPELINE: "true"
+  trigger:
+    include: .gitlab-ci-infra.yml
+    strategy: depend
