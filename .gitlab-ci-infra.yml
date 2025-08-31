@@ -1,6 +1,6 @@
 stages:
   - backend-setup
-  - infra-Iinitialise
+  - infra-initialise
   - infra-validate
   - infra-plan
   - infra-deploy
