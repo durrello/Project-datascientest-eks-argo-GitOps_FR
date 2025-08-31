@@ -1,0 +1,38 @@
+stages:
+  - app-build
+
+variables:
+  DOCKER_IMAGE_NAME: reddit-clone-app
+  DOCKER_TAG: ${CI_COMMIT_SHORT_SHA}
+  APP_ROOT: ${CI_PROJECT_DIR}/Livrables/app
+
+app-build:
+  stage: app-build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USERNAME --password-stdin
+  script:
+    - cd ${APP_ROOT}
+    - echo "Building Docker image for app..."
+    - docker build -t ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .
+    - docker build -t ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest .
+    - echo "Pushing Docker image to registry..."
+    - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
+    - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest
+    - echo "Successfully pushed ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
+  after_script:
+    - docker logout
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Livrables/app/**/*
+      when: manual
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/app/**/*
+      when: manual
