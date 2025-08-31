@@ -1,91 +1,93 @@
 # .gitlab-ci.yml
 stages:
+  - build
   - validate
   - plan
   - deploy
 
 variables:
+  # App variables
+  DOCKER_IMAGE_NAME: ${CI_PROJECT_NAME}
+  DOCKER_TAG: ${CI_COMMIT_SHORT_SHA}
+  APP_ROOT: ${CI_PROJECT_DIR}/Livrables/app
+  
+  # Infrastructure variables
   TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra
   TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
   TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
-  
-# Use the official Terraform image with empty entrypoint
-image:
-  name: hashicorp/terraform:latest
-  entrypoint:
-    - ""
 
-# Cache Terraform plugins and modules
-cache:
-  key: "${TF_CACHE_KEY}"
-  paths:
-    - ${TF_ROOT}/.terraform
-    - ${TF_ROOT}/.terraform.lock.hcl
+# =============================================================================
+# APP BUILD JOBS
+# =============================================================================
 
-before_script:
-  - cd ${TF_ROOT}
-  - terraform --version
-  - terraform init
+# Build and push Docker image when app code changes
+build-docker:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - echo $DOCKERHUB_PASSWORD | docker login -u $DOCKERHUB_USERNAME --password-stdin
+  script:
+    - cd ${APP_ROOT}
+    - echo "Building Docker image..."
+    - docker build -t ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG} .
+    - docker build -t ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest .
+    - echo "Pushing Docker image..."
+    - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}
+    - docker push ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:latest
+    - echo "Image pushed: ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
+  rules:
+    # Only run when there are changes in the app directory
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Livrables/app/**/*
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/app/**/*
+  after_script:
+    - docker logout
+
+# =============================================================================
+# INFRASTRUCTURE JOBS
+# =============================================================================
+
+# Use the official Terraform image for infrastructure jobs
+.terraform-base:
+  image:
+    name: hashicorp/terraform:latest
+    entrypoint: [""]
+  cache:
+    key: "${TF_CACHE_KEY}"
+    paths:
+      - ${TF_ROOT}/.terraform
+      - ${TF_ROOT}/.terraform.lock.hcl
+  before_script:
+    - cd ${TF_ROOT}
+    - terraform --version
+    - terraform init
+  rules:
+    # Only run when there are changes in the infra directory
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Livrables/infra/**/*
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/infra/**/*
 
 # Validate Terraform configuration
-validate:
+validate-terraform:
   stage: validate
+  extends: .terraform-base
   script:
     - terraform validate
     - terraform fmt -check
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
-      when: never
-    - if: '$CI_COMMIT_BRANCH'
 
-# Plan Terraform changes
-plan:
-  stage: plan
-  script:
-    - terraform plan -input=false -out=tfplan
-  artifacts:
-    name: plan
-    paths:
-      - ${TF_ROOT}/tfplan
-    expire_in: 7 days
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS'
-      when: never
-    - if: '$CI_COMMIT_BRANCH'
-
-# Apply Terraform changes (manual for production)
-apply:
-  stage: deploy
-  script:
-    - terraform apply -input=false tfplan
-  dependencies:
-    - plan
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "master"'
-      when: manual
-    - if: '$CI_COMMIT_BRANCH == "develop"'
-      when: on_success
-  environment:
-    name: $CI_COMMIT_REF_SLUG
-    on_stop: destroy
-
-# Destroy infrastructure (manual only)
-destroy:
-  stage: deploy
-  script:
-    - terraform destroy -auto-approve
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "master"'
-      when: manual
-      allow_failure: false
-  environment:
-    name: $CI_COMMIT_REF_SLUG
-    action: stop
-
-# Additional job for security scanning (optional)
-tfsec:
+# Security scanning for Terraform
+tfsec-scan:
   stage: validate
   image:
     name: aquasec/tfsec:latest
@@ -98,5 +100,97 @@ tfsec:
     when: always
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes:
+        - Livrables/infra/**/*
     - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/infra/**/*
   allow_failure: true
+
+# Plan Terraform changes
+plan-terraform:
+  stage: plan
+  extends: .terraform-base
+  script:
+    - terraform plan -input=false -out=tfplan
+  artifacts:
+    name: terraform-plan-${CI_COMMIT_SHORT_SHA}
+    paths:
+      - ${TF_ROOT}/tfplan
+    expire_in: 7 days
+    reports:
+      terraform: ${TF_ROOT}/tfplan.json
+  after_script:
+    - cd ${TF_ROOT}
+    - terraform show -json tfplan > tfplan.json
+
+# Apply Terraform changes
+apply-terraform:
+  stage: deploy
+  extends: .terraform-base
+  script:
+    - terraform apply -input=false tfplan
+  dependencies:
+    - plan-terraform
+  rules:
+    # Auto-apply on develop branch when infra changes
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      changes:
+        - Livrables/infra/**/*
+      when: on_success
+    # Manual apply on main/master branch when infra changes  
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      changes:
+        - Livrables/infra/**/*
+      when: manual
+    # Manual apply on other branches when infra changes
+    - if: '$CI_COMMIT_BRANCH != "main" && $CI_COMMIT_BRANCH != "master" && $CI_COMMIT_BRANCH != "develop"'
+      changes:
+        - Livrables/infra/**/*
+      when: manual
+  environment:
+    name: $CI_COMMIT_REF_SLUG
+    on_stop: destroy-terraform
+
+# Destroy infrastructure (manual only)
+destroy-terraform:
+  stage: deploy
+  extends: .terraform-base
+  script:
+    - terraform destroy -auto-approve
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+      changes:
+        - Livrables/infra/**/*
+      when: manual
+  environment:
+    name: $CI_COMMIT_REF_SLUG
+    action: stop
+  allow_failure: false
+
+# =============================================================================
+# COMBINED DEPLOYMENT (Optional)
+# =============================================================================
+
+# Deploy everything when both app and infra change
+deploy-full-stack:
+  stage: deploy
+  image: alpine:latest
+  script:
+    - echo "Full stack deployment complete!"
+    - echo "Docker image: ${DOCKERHUB_USERNAME}/${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
+    - echo "Infrastructure applied via Terraform"
+  dependencies:
+    - build-docker
+    - apply-terraform
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
+      changes:
+        - Livrables/app/**/*
+        - Livrables/infra/**/*
+      when: manual
+  needs:
+    - job: build-docker
+      optional: true
+    - job: apply-terraform  
+      optional: true
