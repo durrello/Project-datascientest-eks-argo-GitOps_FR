@@ -12,7 +12,7 @@ variables:
 .terraform-base:
   image:
     name: durrellgemuh/terraform-aws:latest
-    entrypoint: ["sh"]
+    entrypoint: [""]
   cache:
     key: "${TF_CACHE_KEY}"
     paths:
