@@ -128,7 +128,8 @@ infra-validate:
   dependencies:
     - backend-setup
   needs:
-    - infra-initialise
+    - job: backend-setup
+      artifacts: true
 
 infra-plan:
   stage: infra-plan
@@ -153,7 +154,8 @@ infra-plan:
     reports:
       terraform: ${TF_ROOT}/tfplan.json
   needs:
-    - infra-validate
+  - job: infra-validate
+    artifacts: true
 
 # Show current state for debugging
 infra-show-state:
@@ -191,7 +193,8 @@ infra-apply:
     - infra-plan
     - backend-setup
   needs:
-    - infra-plan
+    - job: infra-validate
+      artifacts: true
   environment:
     name: production
   rules:
@@ -217,5 +220,8 @@ infra-destroy:
     action: stop
   dependencies:
     - backend-setup
+  needs:
+    - job: infra-validate
+      artifacts: true
   rules:
     - when: manual
