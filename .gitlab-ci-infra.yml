@@ -61,8 +61,6 @@ infra-show-state:
     - terraform init -reconfigure
     - echo "=== Current Terraform State ==="
     - terraform show
-    - echo "=== State List ==="
-    - terraform state list || echo "No state found"
   allow_failure: true
 
 # Last stage: manual apply or destroy
@@ -99,10 +97,7 @@ infra-destroy:
       - ${TF_ROOT}/.terraform
       - ${TF_ROOT}/.terraform.lock.hcl
   script:
-    - echo "=== Current Terraform State ==="
     - terraform init -reconfigure
-    - echo "=== State List ==="
-    - terraform state list || echo "No state found"
     - terraform destroy -auto-approve
     - terraform state list || echo "All resources destroyed"
   environment:
