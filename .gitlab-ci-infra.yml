@@ -195,10 +195,13 @@ infra-apply:
     - infra-plan
     - backend-setup
   needs:
-    - job: infra-plan
-      artifacts: true
-    - job: backend-setup
-      artifacts: true
+  - job: infra-plan
+    artifacts: true
+    optional: true
+  - job: backend-setup
+    artifacts: true
+    optional: true
+
   environment:
     name: production
   rules:
@@ -225,9 +228,11 @@ infra-destroy:
   dependencies:
     - backend-setup
   needs:
-    - job: infra-plan
-      artifacts: true
-    - job: backend-setup
-      artifacts: true
+  - job: infra-plan
+    artifacts: true
+    optional: true
+  - job: backend-setup
+    artifacts: true
+    optional: true
   rules:
     - when: manual
