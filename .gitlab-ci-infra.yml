@@ -69,10 +69,12 @@ backend-setup:
       - ${TF_ROOT}/.terraform.lock.hcl
   before_script:
     - cd ${TF_ROOT}
-    - apt-get update && apt-get install -y unzip curl python3-pip
-    - pip3 install awscli --upgrade
-    - terraform --version
+    - apk add --no-cache python3 py3-pip curl unzip groff less
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install -i /usr/local/aws-cli -b /usr/local/bin
     - aws --version
+    - pip3 install --upgrade awscli
     # Get backend configuration from setup artifacts or fallback
     - |
       if [ -f "../s3_bucket.txt" ] && [ -f "../dynamodb_table.txt" ]; then
