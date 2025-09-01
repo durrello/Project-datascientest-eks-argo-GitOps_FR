@@ -20,7 +20,6 @@ variables:
       - ${TF_ROOT}/.terraform.lock.hcl
   before_script:
     - cd ${TF_ROOT}
-    - ls 
     - aws sts get-caller-identity
     - aws --version
     - terraform --version
@@ -67,11 +66,11 @@ infra-show-state:
   stage: infra-plan
   extends: .terraform-base
   script:
+    - terraform init -reconfigure
     - echo "=== Current Terraform State ==="
     - terraform show
     - echo "=== State List ==="
     - terraform state list || echo "No state found"
-    - terraform init -reconfigure
   allow_failure: true
 
 # Last stage: manual apply or destroy
@@ -84,6 +83,7 @@ infra-apply:
       - ${TF_ROOT}/.terraform.lock.hcl
   extends: .terraform-base
   script:
+    - terraform init -reconfigure
     - terraform apply -auto-approve tfplan
     - echo "=== Resources Created ==="
     - terraform state list
@@ -93,7 +93,6 @@ infra-apply:
   - job: infra-plan
     artifacts: true
     optional: true
-
   environment:
     name: production
   rules:
