@@ -197,6 +197,8 @@ infra-apply:
   needs:
     - job: infra-validate
       artifacts: true
+    - job: backend-setup
+      artifacts: true
   environment:
     name: production
   rules:
@@ -224,6 +226,8 @@ infra-destroy:
     - backend-setup
   needs:
     - job: infra-validate
+      artifacts: true
+    - job: backend-setup
       artifacts: true
   rules:
     - when: manual
