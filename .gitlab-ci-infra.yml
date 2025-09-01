@@ -70,6 +70,11 @@ backend-setup:
   before_script:
     - cd ${TF_ROOT}
     - terraform --version
+    - apk add --no-cache python3 py3-pip curl jq
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install
+    - aws --version
     # Get backend configuration from setup artifacts or fallback
     - |
       if [ -f "../s3_bucket.txt" ] && [ -f "../dynamodb_table.txt" ]; then
@@ -108,15 +113,6 @@ backend-setup:
       changes:
         - Livrables/infra/**/*
 
-# infra-initialise:
-#   stage: infra-initialise
-#   extends: .backend-base
-#   script:
-#     - cd $TF_ROOT
-#     - terraform init -input=false -upgrade
-#   needs:
-#     - backend-setup
-
 infra-validate:
   stage: infra-validate
   extends: .terraform-base
@@ -140,8 +136,11 @@ infra-plan:
       - ${TF_ROOT}/.terraform
       - ${TF_ROOT}/.terraform.lock.hcl
   script:
+    - terraform init -reconfigure
     - terraform plan -input=false -out=tfplan
     - terraform show -json tfplan > tfplan.json
+  dependencies:
+    - backend-setup
   artifacts:
     name: terraform-plan-${CI_COMMIT_SHORT_SHA}
     paths:
@@ -162,8 +161,9 @@ infra-show-state:
     - terraform show
     - echo "=== State List ==="
     - terraform state list || echo "No state found"
-    - echo "=== Workspace ==="
-    - terraform workspace show
+    - terraform init -reconfigure
+  dependencies:
+    - backend-setup
   rules:
     - if: '$CI_COMMIT_BRANCH'
       changes:
@@ -186,6 +186,7 @@ infra-apply:
     - terraform state list
   dependencies:
     - infra-plan
+    - backend-setup
   needs:
     - infra-plan
   environment:
@@ -203,7 +204,7 @@ infra-destroy:
       - ${TF_ROOT}/.terraform.lock.hcl
   script:
     - echo "=== Current Terraform State ==="
-    - terraform show
+    - terraform init -reconfigure
     - echo "=== State List ==="
     - terraform state list || echo "No state found"
     - terraform destroy -auto-approve
@@ -211,5 +212,7 @@ infra-destroy:
   environment:
     name: production
     action: stop
+  dependencies:
+    - backend-setup
   rules:
     - when: manual
