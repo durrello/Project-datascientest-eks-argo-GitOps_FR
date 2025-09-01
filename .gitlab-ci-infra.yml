@@ -1,5 +1,4 @@
 stages:
-  - infra-initialise
   - infra-validate
   - infra-plan
   - infra-deploy
@@ -28,13 +27,6 @@ variables:
     - aws --version
     - pip3 install --upgrade awscli
     - aws configure set region ${AWS_DEFAULT_REGION}
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      changes:
-        - Livrables/infra/**/*
-    - if: '$CI_COMMIT_BRANCH'
-      changes:
-        - Livrables/infra/**/*
 
 infra-validate:
   stage: infra-validate
@@ -83,11 +75,6 @@ infra-show-state:
     - echo "=== State List ==="
     - terraform state list || echo "No state found"
     - terraform init -reconfigure
-  rules:
-    - if: '$CI_COMMIT_BRANCH'
-      changes:
-        - Livrables/infra/**/*
-      when: manual
   allow_failure: true
 
 # Last stage: manual apply or destroy
