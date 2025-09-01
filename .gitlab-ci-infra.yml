@@ -11,7 +11,7 @@ variables:
 
 .terraform-base:
   image:
-    name: hashicorp/terraform:latest
+    name: amazon/aws-cli:latest
     entrypoint: [""]
   cache:
     key: "${TF_CACHE_KEY}"
