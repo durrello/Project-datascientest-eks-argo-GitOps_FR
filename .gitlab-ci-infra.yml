@@ -1,62 +1,14 @@
 stages:
-  - backend-setup
   - infra-initialise
   - infra-validate
   - infra-plan
   - infra-deploy
 
 variables:
-  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra/main
-  BACKEND_ROOT: ${CI_PROJECT_DIR}/Livrables/infra/backend
+  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra
   TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
   TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
   AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
-  
-  # Backend configuration (will be set by backend-setup job)
-  TF_STATE_BUCKET: ""
-  TF_STATE_LOCK_TABLE: ""
-
-.backend-base:
-  image:
-    name: hashicorp/terraform:latest
-    entrypoint: [""]
-  before_script:
-    - cd ${BACKEND_ROOT}
-    - terraform --version
-    - terraform init
-  cache:
-    key: "${TF_CACHE_KEY}"
-    paths:
-      - ${TF_ROOT}/.terraform/
-      - ${TF_ROOT}/.terraform.lock.hcl
-
-backend-setup:
-  stage: backend-setup
-  extends: .backend-base
-  script:
-    - echo "Setting up Terraform backend infrastructure..."
-    - terraform validate
-    - terraform plan -out=backend-plan
-    - terraform apply -input=false backend-plan
-    - echo "=== Backend Setup Complete ==="
-    - terraform output -raw s3_bucket_name > ../s3_bucket.txt
-    - terraform output -raw dynamodb_table_name > ../dynamodb_table.txt
-    - echo "S3 Bucket $(cat ../s3_bucket.txt)"
-    - echo "DynamoDB Table $(cat ../dynamodb_table.txt)"
-  artifacts:
-    paths:
-      - s3_bucket.txt
-      - dynamodb_table.txt
-    expire_in: 1 day
-  rules:
-    - if: '$CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"'
-      changes:
-        - Livrables/backend/**/*
-      when: manual
-    - if: '$CI_COMMIT_BRANCH'
-      changes:
-        - Livrables/backend/**/*
-      when: manual
 
 .terraform-base:
   image:
@@ -75,36 +27,7 @@ backend-setup:
     - ./aws/install -i /usr/local/aws-cli -b /usr/local/bin
     - aws --version
     - pip3 install --upgrade awscli
-    # Get backend configuration from setup artifacts or fallback
-    - |
-      if [ -f "../s3_bucket.txt" ] && [ -f "../dynamodb_table.txt" ]; then
-        export TF_STATE_BUCKET=$(cat ../s3_bucket.txt)
-        export TF_STATE_LOCK_TABLE=$(cat ../dynamodb_table.txt)
-        echo "Using backend from setup S3=$TF_STATE_BUCKET DynamoDB=$TF_STATE_LOCK_TABLE"
-      else
-        # Fallback to predefined values or error
-        if [ -z "$TF_STATE_BUCKET" ] || [ -z "$TF_STATE_LOCK_TABLE" ]; then
-          echo "ERROR Backend not configured. Run backend-setup first or set TF_STATE_BUCKET and TF_STATE_LOCK_TABLE variables"
-          exit 1
-        fi
-        echo "Using predefined backend S3=$TF_STATE_BUCKET DynamoDB=$TF_STATE_LOCK_TABLE"
-      fi
-    # Create backend configuration for S3
-    - |
-      cat > backend.tf << EOF
-      terraform {
-        backend "s3" {
-          bucket         = "${TF_STATE_BUCKET}"
-          key            = "environments/${TF_STATE_NAME}/terraform.tfstate"
-          region         = "${AWS_DEFAULT_REGION}"
-          dynamodb_table = "${TF_STATE_LOCK_TABLE}"
-          encrypt        = true
-        }
-      }
-      EOF
-    - terraform init -reconfigure
-  dependencies:
-    - backend-setup
+    - aws configure set region ${AWS_DEFAULT_REGION}
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
       changes:
@@ -125,11 +48,6 @@ infra-validate:
     - terraform init -reconfigure
     - terraform validate
     - terraform fmt -check
-  dependencies:
-    - backend-setup
-  needs:
-    - job: backend-setup
-      artifacts: true
 
 infra-plan:
   stage: infra-plan
@@ -143,8 +61,6 @@ infra-plan:
     - terraform init -reconfigure
     - terraform plan -input=false -out=tfplan
     - terraform show -json tfplan > tfplan.json
-  dependencies:
-    - backend-setup
   artifacts:
     name: terraform-plan-${CI_COMMIT_SHORT_SHA}
     paths:
@@ -155,8 +71,6 @@ infra-plan:
       terraform: ${TF_ROOT}/tfplan.json
   needs:
     - job: infra-validate
-      artifacts: true
-    - job: backend-setup
       artifacts: true
 
 # Show current state for debugging
@@ -169,8 +83,6 @@ infra-show-state:
     - echo "=== State List ==="
     - terraform state list || echo "No state found"
     - terraform init -reconfigure
-  dependencies:
-    - backend-setup
   rules:
     - if: '$CI_COMMIT_BRANCH'
       changes:
@@ -193,12 +105,8 @@ infra-apply:
     - terraform state list
   dependencies:
     - infra-plan
-    - backend-setup
   needs:
   - job: infra-plan
-    artifacts: true
-    optional: true
-  - job: backend-setup
     artifacts: true
     optional: true
 
@@ -225,13 +133,8 @@ infra-destroy:
   environment:
     name: production
     action: stop
-  dependencies:
-    - backend-setup
   needs:
   - job: infra-plan
-    artifacts: true
-    optional: true
-  - job: backend-setup
     artifacts: true
     optional: true
   rules:
