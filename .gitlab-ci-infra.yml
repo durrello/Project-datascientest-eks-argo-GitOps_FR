@@ -11,8 +11,8 @@ variables:
 
 .terraform-base:
   image:
-    name: amazon/aws-cli:latest
-    entrypoint: [""]
+    name: durrellgemuh/terraform-aws:latest
+    entrypoint: ["sh"]
   cache:
     key: "${TF_CACHE_KEY}"
     paths:
@@ -20,9 +20,10 @@ variables:
       - ${TF_ROOT}/.terraform.lock.hcl
   before_script:
     - cd ${TF_ROOT}
-    # - apt-get update && apt-get install -y python3 python3-pip curl unzip
-    # - pip3 install awscli
+    - ls 
+    - aws sts get-caller-identity
     - aws --version
+    - terraform --version
 
 infra-validate:
   stage: infra-validate
