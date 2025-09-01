@@ -125,7 +125,8 @@ infra-validate:
     - terraform validate
     - terraform fmt -check
   needs:
-    - infra-initialise
+    - job: backend-setup
+      artifacts: true
 
 infra-plan:
   stage: infra-plan
