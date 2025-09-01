@@ -154,8 +154,10 @@ infra-plan:
     reports:
       terraform: ${TF_ROOT}/tfplan.json
   needs:
-  - job: infra-validate
-    artifacts: true
+    - job: infra-validate
+      artifacts: true
+    - job: backend-setup
+      artifacts: true
 
 # Show current state for debugging
 infra-show-state:
