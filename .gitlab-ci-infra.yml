@@ -47,16 +47,8 @@ infra-plan:
       - ${TF_ROOT}/.terraform.lock.hcl
   script:
     - terraform init -reconfigure
-    - terraform plan -input=false -out=tfplan
-    - terraform show -json tfplan > tfplan.json
-  artifacts:
-    name: terraform-plan-${CI_COMMIT_SHORT_SHA}
-    paths:
-      - ${TF_ROOT}/tfplan
-      - ${TF_ROOT}/tfplan.json
-    expire_in: 7 days
-    reports:
-      terraform: ${TF_ROOT}/tfplan.json
+    - terraform plan 
+    - terraform show
   needs:
     - job: infra-validate
       artifacts: true
@@ -84,7 +76,7 @@ infra-apply:
   extends: .terraform-base
   script:
     - terraform init -reconfigure
-    - terraform apply -auto-approve tfplan
+    - terraform apply -auto-approve
     - echo "=== Resources Created ==="
     - terraform state list
   dependencies:
