@@ -122,11 +122,13 @@ infra-validate:
       - ${TF_ROOT}/.terraform
       - ${TF_ROOT}/.terraform.lock.hcl
   script:
+    - terraform init -reconfigure
     - terraform validate
     - terraform fmt -check
+  dependencies:
+    - backend-setup
   needs:
-    - job: backend-setup
-      artifacts: true
+    - infra-initialise
 
 infra-plan:
   stage: infra-plan
