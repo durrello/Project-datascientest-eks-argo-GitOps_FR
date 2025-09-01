@@ -195,7 +195,7 @@ infra-apply:
     - infra-plan
     - backend-setup
   needs:
-    - job: infra-validate
+    - job: infra-plan
       artifacts: true
     - job: backend-setup
       artifacts: true
@@ -225,7 +225,7 @@ infra-destroy:
   dependencies:
     - backend-setup
   needs:
-    - job: infra-validate
+    - job: infra-plan
       artifacts: true
     - job: backend-setup
       artifacts: true
