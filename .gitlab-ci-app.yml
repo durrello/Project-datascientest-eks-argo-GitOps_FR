@@ -4,7 +4,7 @@ stages:
 variables:
   DOCKER_IMAGE_NAME: reddit-clone-app
   DOCKER_TAG: ${CI_COMMIT_SHORT_SHA}
-  APP_ROOT: ${CI_PROJECT_DIR}/Livrables/app
+  APP_ROOT: ${CI_PROJECT_DIR}/src/app
 
 app-build:
   stage: app-build

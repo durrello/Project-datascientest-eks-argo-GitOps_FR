@@ -4,7 +4,7 @@ stages:
   - infra-deploy
 
 variables:
-  TF_ROOT: ${CI_PROJECT_DIR}/Livrables/infra
+  TF_ROOT: ${CI_PROJECT_DIR}/src/infra
   TF_STATE_NAME: ${CI_COMMIT_REF_SLUG}
   TF_CACHE_KEY: ${CI_COMMIT_REF_SLUG}
   AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"

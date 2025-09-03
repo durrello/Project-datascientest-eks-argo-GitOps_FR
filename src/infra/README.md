@@ -1,16 +1,16 @@
-# AWS EKS Infrastructure with SonarQube
+# AWS EKS Infrastructure
 
 This Terraform configuration creates a complete AWS infrastructure including:
 - EKS cluster with ArgoCD, Prometheus, and Grafana
-- EC2 instance with SonarQube pre-installed
 - VPC with public and private subnets
 - All necessary IAM roles and security groups
 
 ## Directory Structure
-
 ```
 .
 ├── main.tf
+├── provider.tf
+├── backend.tf
 ├── variables.tf
 ├── outputs.tf
 ├── terraform.tfvars
@@ -35,13 +35,12 @@ This Terraform configuration creates a complete AWS infrastructure including:
         └── sonarqube-install.sh
 ```
 
-## Prerequisites
+## Prerequisites for local deployment
 
 1. AWS CLI configured with appropriate permissions
 2. Terraform installed (>= 1.0)
 3. kubectl installed
 4. helm installed
-5. An existing EC2 key pair in your AWS region
 
 ## Required AWS Permissions
 
@@ -111,6 +110,9 @@ kubectl -n argocd port-forward svc/argocd-server 8080:80
 # Port forward to access Grafana
 kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80
 
+# Get Grafana admin password
+kubectl get secret --namespace monitoring prometheus-grafana -o jsonpath="{.data.admin-password}" | base64 --decode
+
 # Access at: http://localhost:3000
 # Username: admin
 # Password: admin123 (or check values in helm chart)
@@ -123,13 +125,6 @@ kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 909
 
 # Access at: http://localhost:9090
 ```
-
-#### SonarQube
-SonarQube will be accessible directly via the public IP:
-```
-http://<sonarqube-public-ip>:9000
-```
-Default credentials: admin/admin
 
 ## Important Notes
 
@@ -191,13 +186,6 @@ aws eks describe-cluster --name <cluster-name>
 
 # Check node group status
 aws eks describe-nodegroup --cluster-name <cluster-name> --nodegroup-name main
-```
-
-### SonarQube Issues
-```bash
-# Check SonarQube logs
-ssh -i <your-key>.pem ubuntu@<sonarqube-ip>
-sudo journalctl -u sonarqube -f
 ```
 
 ### Helm Issues

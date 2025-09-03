@@ -1,46 +1,48 @@
-# Deploying Your Reddit Clone to the Infrastructure
+# Deploying Your Reddit Clone to the Infrastructure locally and via gitlab
 
+# Local Deployment of the infrastructure
 ## Prerequisites
-1. Your Terraform infrastructure is deployed and running
-2. Docker image of your Reddit clone application
-3. kubectl configured to connect to your EKS cluster
-4. AWS CLI configured
+1. Local environment(vagrant or others)/AWS EC2 instance with Docker installed
+2. Docker image of your Reddit clone application [How to build the reddit-clone-app image](src/app/README.md)
+3. AWS CLI configured
+4. kubectl configured to connect to your EKS cluster
 
-# Get your AWS account ID
+## Get your AWS account ID
 ```bash
 aws sts get-caller-identity --query Account --output text
 ```
 ## Step 0: Build the infrastructure
-Follow this to build your infrastructure: [Link to infra setup](Livrables/infra/README.md)
+Follow this to build your infrastructure: [Link to infra setup](src/infra/README.md)
 
 ## Step 1: Configure kubectl for EKS
-
 ```bash
 # Update kubeconfig
-aws eks update-kubeconfig --region us-east-1 --name my-eks-cluster
+aws eks update-kubeconfig --region <region> --name <cluster-name>
 
 # Verify connection
 kubectl get nodes
 ```
 
-## Step 2: Build and Push Your Image
-Follow this to build your image and push to either docker hub or aws elastic container registry: [Link to infra setup](Livrables/app/README.md)
+## Step 3: Access Services | Done in Step 0
 
-## Step 3: Access ArgoCD
-
+### ArgoCD
 ```bash
 # Get ArgoCD admin password
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 
 # Port forward to access ArgoCD UI
+# Port-forward with HTTPS (secure mode)
 kubectl port-forward svc/argocd-server -n argocd 8080:443
 
-# Access ArgoCD at https://127.0.0.1:8080
+# Port-forward with HTTP (insecure mode) - When running Locally
+kubectl -n argocd port-forward svc/argocd-server 8080:80
+
+# Access at: https://127.0.0.1:8080
 # Username: admin
 # Password: (from the command above)
 ```
 
-## Step 4: Access Monitoring
+### Access Monitoring - Prometheus and Grafana
 
 ```bash
 # Port forward Grafana
@@ -56,95 +58,72 @@ kubectl get secret --namespace monitoring prometheus-grafana -o jsonpath="{.data
 # Port forward Prometheus (optional)
 kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090
 ```
-To view the website deployed via argocd
-# Wait for LoadBalancer (2-5 minutes)
-```bash
-kubectl get svc reddit-clone-service -w
-```
-# Once EXTERNAL-IP appears (not <pending>), use that URL
-# Example: http://a1234567-123456789.us-east-1.elb.amazonaws.com
 
+## Step 2: Build and Push Your Image
+Follow this to build your image and push to either docker hub or aws elastic container registry: [Link to infra setup](src/app/README.md)
 
 ## Integration Workflow
 
 ### 1. GitOps with ArgoCD
-- Store your Kubernetes manifests in a Git repository
+- Store your Kubernetes [manifests](src/k8s/) in a Git repository
 - Configure ArgoCD to monitor your Git repository
 - ArgoCD will automatically deploy changes when you push to Git
 
-### 2. CI/CD Pipeline Integration
+# Deployment with GitLab CI/CD Pipeline Integration
 Here's how to integrate everything:
 
-```yaml
-# .github/workflows/ci-cd.yml example
-name: CI/CD Pipeline
+Using gitlab CICD we have 3 files responsible for building the application image and the infrastructure 
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+[.gitlab-ci.yml](.gitlab-ci.yml) is responsible for nested child triggers
 
-jobs:
-  sonar-analysis:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - name: SonarQube Scan
-        uses: sonarqube-quality-gate-action@master
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: http://YOUR_SONARQUBE_IP:9000
+[.gitlab-ci-app.yml](.gitlab-ci-app.yml) this will trigger a build for image based on the code from src/app directory 
 
-  build-and-deploy:
-    needs: sonar-analysis
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-      
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      
-      - name: Build and push Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: reddit-clone
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-      
-      - name: Update Kubernetes manifests
-        run: |
-          # Update your Kubernetes manifests with new image tag
-          sed -i 's|image: .*|image: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG|' k8s/deployment.yaml
-          # Commit and push to trigger ArgoCD deployment
+[.gitlab-ci-app.yml](.gitlab-ci-app.yml) this will trigger a create or destroy on the infrastructure.
+
+## Step 0 | Prerequisite 
+
+### Image needed for the infratructure pipeline
+Build and push custom image needed for the infrastructure pipeline 
+[Here is how to build and push](src/dockerimage/README.md)
+
+### Image needed for the application
+Build and push the app image to the registry, ECR or Docker
+[Here is how to build and push](src/app/README.md)
+
+## Step 1
+Setup environment variables on gitlab for the pipeline to run succesfully
+
+## Step 2
+Access the cluster 
+```bash
+# Update kubeconfig
+aws eks update-kubeconfig --region us-east-1 --name my-eks-cluster
+
+# Verify connection
+kubectl get nodes
 ```
+
+## Step 3 access service UI's
+Get the Load balancer endpoint for argocd
+```bash
+kubectl get svc -n argocd
+```
+Look for the EXTERNAL-IP. This is your ArgoCD dashboard URL.
+
+Expose via LoadBalancer
+```bash
+kubectl patch svc prometheus-grafana -n monitoring \
+  -p '{"spec": {"type": "LoadBalancer"}}'
+```
+Then:
+```bash
+kubectl get svc prometheus-grafana -n monitoring
+```
+Look for the EXTERNAL-IP, then access: http://<EXTERNAL-IP>
+
 
 ## Next Steps
-
 1. **Set up your Git repository structure**:
-```
-your-reddit-clone/
-├── src/                    # Your Node.js application code
-├── Dockerfile             # Docker configuration
-├── k8s/                   # Kubernetes manifests
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   ├── ingress.yaml
-│   └── configmap.yaml
-├── .github/workflows/     # CI/CD pipelines
-└── README.md
-```
-
 2. **Configure ArgoCD Application** to point to your Git repository
 3. **Set up monitoring dashboards** in Grafana for your application
 4. **Configure SonarQube** quality gates for your project
@@ -152,7 +131,6 @@ your-reddit-clone/
 
 ## Monitoring Your Application
 
-- **Logs**: `kubectl logs -f deployment/reddit-clone -n default`
 - **Metrics**: Available in Grafana dashboards
 - **Health**: Monitor through Prometheus alerts
 - **Code Quality**: Track in SonarQube dashboard
@@ -161,8 +139,8 @@ your-reddit-clone/
 
 ```bash
 # Scale your application
-kubectl scale deployment reddit-clone --replicas=5
+kubectl scale deployment reddit-clone-app --replicas=5
 
 # Set up Horizontal Pod Autoscaler
-kubectl autoscale deployment reddit-clone --cpu-percent=70 --min=2 --max=10
+kubectl autoscale deployment reddit-clone-app --cpu-percent=70 --min=2 --max=10
 ```
